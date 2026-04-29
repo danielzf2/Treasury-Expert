@@ -62,7 +62,7 @@
 
             <hr class="divider">
 
-            <!-- Results -->
+            <!-- Summary -->
             <div id="metricsArea"></div>
 
             <div class="sec-h">Ativo vs Passivo</div>
@@ -70,48 +70,49 @@
 
             <div id="riskFactors"></div>
 
+            <!-- ============================================================
+                 SCENARIO ANALYSIS — controls + all scenario-dependent outputs
+                 ============================================================ -->
+            <div class="scenario-block">
+                <div class="sec-h">Análise de Cenários</div>
+                <div class="scenario-radio" id="scenarioRadio"></div>
+                <div id="scenarioDesc" class="muted" style="font-size:12px; margin-bottom:8px"></div>
+
+                <div class="chart-area">
+                    <div>
+                        <div class="chart-tabs" id="chartTabs"></div>
+                        <div id="chartContainer" style="min-height:400px"></div>
+                    </div>
+                    <div class="sliders-panel" id="slidersPanel"></div>
+                </div>
+
+                <div id="pnlBarsChart"></div>
+                <div id="pnlTotal" class="metrics" style="grid-template-columns:1fr"></div>
+
+                <div id="mtmTable"></div>
+
+                <div class="two-col">
+                    <div id="pnlConsolidatedChart"></div>
+                    <div id="pnlPerLegChart"></div>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 DETAILS — static analysis, cashflows, hedge
+                 ============================================================ -->
             <hr class="divider">
 
             <div class="sec-h">Detalhes das Pernas</div>
             <div id="detailsTable" class="details-wrap"></div>
 
-            <!-- Spread & Costs (casada only) -->
+            <!-- Spread & Costs -->
             <div id="spreadCosts"></div>
 
-            <!-- KRD & Cashflows -->
+            <!-- Cashflows / KRD -->
             <div id="krdSection"></div>
 
             <!-- Hedge Modes -->
             <div id="hedgeSection"></div>
-
-            <hr class="divider">
-
-            <!-- Scenarios -->
-            <div class="sec-h">Cenários de Curva de Juros</div>
-            <div class="scenario-radio" id="scenarioRadio"></div>
-            <div id="scenarioDesc" class="muted" style="font-size:12px; margin-bottom:8px"></div>
-
-            <div class="chart-area">
-                <div>
-                    <div class="chart-tabs" id="chartTabs"></div>
-                    <div id="chartContainer" style="min-height:400px"></div>
-                </div>
-                <div class="sliders-panel" id="slidersPanel"></div>
-            </div>
-
-            <div id="pnlBarsChart"></div>
-            <div id="pnlTotal" class="metrics" style="grid-template-columns:1fr"></div>
-
-            <hr class="divider">
-
-            <div id="mtmTable"></div>
-
-            <hr class="divider">
-
-            <div class="two-col">
-                <div id="pnlConsolidatedChart"></div>
-                <div id="pnlPerLegChart"></div>
-            </div>
         </div>
 
         <!-- Tab: Dados de Mercado -->

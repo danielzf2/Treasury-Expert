@@ -23,7 +23,7 @@ class ScenarioDefinition:
 
         Args:
             t: posicao normalizada na curva, -1 (curto) a +1 (longo)
-            mag: magnitude em bps (sempre positiva para a UI)
+            mag: magnitude em bps (positivo = direcao do cenario, negativo = oposta)
         """
         raise NotImplementedError
 
@@ -31,50 +31,44 @@ class ScenarioDefinition:
 class BullParallel(ScenarioDefinition):
     """Todas as taxas caem uniformemente."""
     def delta(self, t, mag):
-        return -abs(mag)
+        return -mag
 
 class BearParallel(ScenarioDefinition):
     """Todas as taxas sobem uniformemente."""
     def delta(self, t, mag):
-        return abs(mag)
+        return mag
 
 class BullSteepener(ScenarioDefinition):
     """Curtos caem mais que longos. Tipico: corte de Selic."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return -a + a * ((t + 1) / 2)
+        return -mag + mag * ((t + 1) / 2)
 
 class BearSteepener(ScenarioDefinition):
     """Longos sobem mais que curtos. Tipico: premio a termo, fiscal."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return a * ((t + 1) / 2)
+        return mag * ((t + 1) / 2)
 
 class BullFlattener(ScenarioDefinition):
     """Longos caem mais que curtos. Tipico: recessao, risk-off."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return -a * ((t + 1) / 2)
+        return -mag * ((t + 1) / 2)
 
 class BearFlattener(ScenarioDefinition):
     """Curtos sobem mais que longos. Tipico: ciclo de alta da Selic."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return a - a * ((t + 1) / 2)
+        return mag - mag * ((t + 1) / 2)
 
 class PositiveButterfly(ScenarioDefinition):
     """Barriga sobe, pontas caem. Pressao no miolo da curva.
     Mean-zero: integral de -1 a 1 = 0 (sem bias direcional)."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return a * (0.5 - 1.5 * t * t)
+        return mag * (0.5 - 1.5 * t * t)
 
 class NegativeButterfly(ScenarioDefinition):
     """Barriga cai, pontas sobem. Demanda pelo belly.
     Mean-zero: integral de -1 a 1 = 0 (sem bias direcional)."""
     def delta(self, t, mag):
-        a = abs(mag)
-        return a * (1.5 * t * t - 0.5)
+        return mag * (1.5 * t * t - 0.5)
 
 class CustomScenario(ScenarioDefinition):
     """Cenario customizado com 3 componentes independentes."""

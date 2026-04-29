@@ -400,23 +400,70 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     border-bottom-color: #58a6ff;
 }
 
+/* Scenario analysis block */
+.scenario-block {
+    background: #131820;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 20px;
+    margin-top: 20px;
+}
+.scenario-block > .sec-h {
+    margin-top: 0;
+    font-size: 15px;
+    border-bottom-color: #484f58;
+}
+
 /* Sliders panel */
+.sliders-panel {
+    min-width: 200px;
+}
+.sliders-panel .slider-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e6edf3;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.sliders-panel .slider-hint {
+    color: #6e7681;
+    font-size: 10px;
+    line-height: 1.3;
+    margin-bottom: 6px;
+}
+.sliders-panel .slider-group {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #21262d;
+}
+.sliders-panel .slider-group:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
 .sliders-panel label {
-    display: block;
-    color: #8b949e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #c9d1d9;
     font-size: 11px;
-    margin: 8px 0 2px;
+    font-weight: 500;
+    margin-bottom: 3px;
+}
+.sliders-panel .slider-val {
+    color: #58a6ff;
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    min-width: 32px;
+    text-align: right;
 }
 .sliders-panel input[type=range] {
     width: 100%;
     accent-color: #58a6ff;
     cursor: pointer;
-}
-.sliders-panel .slider-val {
-    color: #e6edf3;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
+    margin-bottom: 2px;
 }
 
 /* Scenario radio */
@@ -430,11 +477,15 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     background: #161b22;
     border: 1px solid #30363d;
     border-radius: 6px;
-    padding: 4px 10px;
+    padding: 5px 12px;
     font-size: 11px;
     color: #8b949e;
     cursor: pointer;
     transition: all 0.15s;
+}
+.scenario-radio label:hover {
+    border-color: #484f58;
+    color: #c9d1d9;
 }
 .scenario-radio input { display: none; }
 .scenario-radio input:checked + span { color: #e6edf3; }

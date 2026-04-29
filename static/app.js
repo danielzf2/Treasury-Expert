@@ -443,25 +443,32 @@ function renderSliders() {
     const hasCupom = r.legs.some(l => ["FRC","DDI"].includes(l.instrument)) || (r.legs.some(l=>l.instrument==="DOL") && r.legs.some(l=>l.instrument==="DI1"));
     const hasFx = r.legs.some(l => l.instrument === "DOL");
 
+    const preInsts = r.legs.filter(l => ["LTN","NTN-F","DI1"].includes(l.instrument)).map(l => l.instrument);
+    const preLabel = preInsts.length ? preInsts.filter((v,i,a)=>a.indexOf(v)===i).join(", ") : "DI1, LTN, NTN-F";
+
     const el = document.getElementById("slidersPanel");
-    let html = '<p style="font-size:12px;color:#8b949e;margin-bottom:4px">Choques</p>';
+    let html = '<div class="slider-header">Choques de Cenário</div>';
+    html += '<p class="slider-hint">Mova os sliders para chocar taxas e ver o impacto no P&L. Positivo = direção do cenário, negativo = direção oposta.</p>';
     if (state.scenarioKey === "custom") {
-        html += sliderHtml("Paralelo (bps)", "customParallel", state.customParallel, -50, 50, 1);
-        html += sliderHtml("Inclinação (bps)", "customSlope", state.customSlope, -50, 50, 1);
-        html += sliderHtml("Curvatura (bps)", "customCurvature", state.customCurvature, -50, 50, 1);
+        html += sliderHtml("Paralelo", "customParallel", state.customParallel, -50, 50, 1, "Shift uniforme em todos os vértices");
+        html += sliderHtml("Inclinação", "customSlope", state.customSlope, -50, 50, 1, "Diferença curto vs longo");
+        html += sliderHtml("Curvatura", "customCurvature", state.customCurvature, -50, 50, 1, "Barriga vs pontas");
     } else {
-        html += sliderHtml("Pre (bps)", "magnitude", state.magnitude, -50, 50, 1);
+        html += sliderHtml("Cenário (bps)", "magnitude", state.magnitude, -50, 50, 1, `Aplica o cenário selecionado a ${preLabel}`);
     }
-    if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5);
-    if (hasIpca) html += sliderHtml("IPCA (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1);
-    if (hasCupom) html += sliderHtml("Cup.Cambial (bps)", "deltaCupom", state.deltaCupom, -50, 50, 1);
+    if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5, "Variação % no spot USD/BRL — afeta DOL");
+    if (hasIpca) html += sliderHtml("Taxa Real (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1, "Choque na taxa real IPCA — afeta NTN-B, DAP");
+    if (hasCupom) html += sliderHtml("Cup. Cambial (bps)", "deltaCupom", state.deltaCupom, -50, 50, 1, "Choque no cupom cambial — afeta FRC, DDI");
     el.innerHTML = html;
 }
 
-function sliderHtml(label, key, val, min, max, step) {
-    return `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${val}"
-        oninput="state.${key}=+this.value;this.nextElementSibling.textContent=this.value;loadCharts()">
-        <div class="slider-val">${val}</div>`;
+function sliderHtml(label, key, val, min, max, step, hint) {
+    return `<div class="slider-group">
+        <label>${label} <span class="slider-val" id="val_${key}">${val}</span></label>
+        <input type="range" min="${min}" max="${max}" step="${step}" value="${val}"
+            oninput="state.${key}=+this.value;document.getElementById('val_${key}').textContent=this.value;loadCharts()">
+        ${hint ? `<div class="slider-hint">${hint}</div>` : ""}
+    </div>`;
 }
 
 async function loadCharts() {
