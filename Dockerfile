@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server/ server/
 COPY docs/ docs/
 COPY casada-tool/ casada-tool/
+COPY .streamlit/ .streamlit/
 COPY asgi_app.py .
 COPY start.sh .
 RUN chmod +x start.sh
