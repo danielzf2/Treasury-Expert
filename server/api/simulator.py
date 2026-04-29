@@ -21,6 +21,7 @@ from lib.charts import (
     chart_pnl_consolidado, chart_pnl_por_perna,
     chart_cupom_cambial, chart_dol_forward, chart_taxa_real,
 )
+from lib import anbima_fetchers
 
 router = APIRouter(tags=["simulator"])
 
@@ -28,6 +29,59 @@ router = APIRouter(tags=["simulator"])
 # PRESETS
 # ---------------------------------------------------------------------------
 
+_FALLBACK_VNA_NTNB = 4500.0  # usado se feed Brasil Indicadores estiver fora do ar
+
+
+def _ntnb_vna_dynamic() -> float:
+    """VNA D0 da NTN-B do Brasil Indicadores, com fallback hardcoded."""
+    try:
+        v = anbima_fetchers.get_vna_ntnb()
+        if v and v > 0:
+            return v
+    except Exception:
+        pass
+    return _FALLBACK_VNA_NTNB
+
+
+def _build_presets() -> dict:
+    """Constroi PRESETS com VNA NTN-B dinamico."""
+    vna_ntnb = _ntnb_vna_dynamic()
+    return {
+        "Casada LTN+DI1": [
+            {"instrument": "LTN", "ticker": "F32", "direction": "C", "quantity": 2000, "taxa": 13.7625, "corr_type": "% na taxa", "corr_value": 0.001},
+            {"instrument": "DI1", "ticker": "F32", "direction": "C", "quantity": 20, "taxa": 13.650, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "Venda Casada LTN+DI1": [
+            {"instrument": "LTN", "ticker": "F32", "direction": "V", "quantity": 2000, "taxa": 13.7625, "corr_type": "% na taxa", "corr_value": 0.001},
+            {"instrument": "DI1", "ticker": "F32", "direction": "V", "quantity": 20, "taxa": 13.650, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "Casada NTN-F+DI1": [
+            {"instrument": "NTN-F", "ticker": "F31", "direction": "C", "quantity": 2000, "taxa": 13.80, "corr_type": "% na taxa", "corr_value": 0.001},
+            {"instrument": "DI1", "ticker": "F31", "direction": "C", "quantity": 20, "taxa": 13.65, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "Casada NTN-B+DAP": [
+            {"instrument": "NTN-B", "ticker": "N29", "direction": "C", "quantity": 2000, "taxa": 7.50, "corr_type": "% na taxa", "corr_value": 0.001, "vna": vna_ntnb},
+            {"instrument": "DAP", "ticker": "N29", "direction": "C", "quantity": 20, "taxa": 7.40, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "DOL+DI1 (cupom sint.)": [
+            {"instrument": "DOL", "ticker": "K26", "direction": "C", "quantity": 10, "taxa": 4976.5, "corr_type": "Nenhuma", "corr_value": 0.0},
+            {"instrument": "DI1", "ticker": "K26", "direction": "C", "quantity": 10, "taxa": 14.60, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "DI1+FRC (dol sint.)": [
+            {"instrument": "DI1", "ticker": "F28", "direction": "C", "quantity": 20, "taxa": 14.60, "corr_type": "R$/contrato", "corr_value": 1.30},
+            {"instrument": "FRC", "ticker": "F28", "direction": "V", "quantity": 20, "taxa": 5.06, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "FRC direcional": [
+            {"instrument": "FRC", "ticker": "F28", "direction": "C", "quantity": 20, "taxa": 5.06, "corr_type": "R$/contrato", "corr_value": 1.30},
+        ],
+        "LTN direcional": [
+            {"instrument": "LTN", "ticker": "F32", "direction": "C", "quantity": 2000, "taxa": 13.76, "corr_type": "% na taxa", "corr_value": 0.001},
+        ],
+    }
+
+
+# PRESETS estatico (mantido pra compatibilidade com testes/codigo legado).
+# A versao dinamica eh chamada via GET /sim/presets.
 PRESETS = {
     "Casada LTN+DI1": [
         {"instrument": "LTN", "ticker": "F32", "direction": "C", "quantity": 2000, "taxa": 13.7625, "corr_type": "% na taxa", "corr_value": 0.001},
@@ -42,7 +96,7 @@ PRESETS = {
         {"instrument": "DI1", "ticker": "F31", "direction": "C", "quantity": 20, "taxa": 13.65, "corr_type": "R$/contrato", "corr_value": 1.30},
     ],
     "Casada NTN-B+DAP": [
-        {"instrument": "NTN-B", "ticker": "N29", "direction": "C", "quantity": 2000, "taxa": 7.50, "corr_type": "% na taxa", "corr_value": 0.001, "vna": 4500.0},
+        {"instrument": "NTN-B", "ticker": "N29", "direction": "C", "quantity": 2000, "taxa": 7.50, "corr_type": "% na taxa", "corr_value": 0.001, "vna": _FALLBACK_VNA_NTNB},
         {"instrument": "DAP", "ticker": "N29", "direction": "C", "quantity": 20, "taxa": 7.40, "corr_type": "R$/contrato", "corr_value": 1.30},
     ],
     "DOL+DI1 (cupom sint.)": [
@@ -622,7 +676,12 @@ class MtmTableRequest(BaseModel):
 
 @router.get("/presets")
 def get_presets():
-    return PRESETS
+    """Retorna presets do simulador com VNA NTN-B atualizado D0 (Brasil Indicadores).
+
+    O VNA dinamico evita que o preco da NTN-B fique desatualizado em producao.
+    Em caso de falha do feed, usa fallback hardcoded em _FALLBACK_VNA_NTNB.
+    """
+    return _build_presets()
 
 
 # ---------------------------------------------------------------------------
@@ -815,6 +874,53 @@ def get_tickers(instrument: str):
     snap = _get_market_data()
     tickers = _available_tickers(instrument, snap)
     return {"instrument": instrument, "tickers": tickers}
+
+
+# ---------------------------------------------------------------------------
+# 11b. GET /vna - VNA D0 oficial (Brasil Indicadores)
+# ---------------------------------------------------------------------------
+
+@router.get("/vna")
+def get_vna():
+    """Retorna VNA D0 da NTN-B, NTN-C e LFT do Brasil Indicadores (cache 30min).
+
+    Use no frontend para preencher o campo VNA da NTN-B automaticamente.
+    """
+    records = anbima_fetchers.fetch_vna_brasil_indicadores()
+    return {
+        "source": "brasilindicadores.com.br",
+        "records": [r.to_dict() for r in records],
+        "vna_ntnb": anbima_fetchers.get_vna_ntnb(),
+        "vna_lft": anbima_fetchers.get_vna_lft(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 11c. GET /anbima-tpf - PU oficial ANBIMA dos TPFs (TXT D-1)
+# ---------------------------------------------------------------------------
+
+@router.get("/anbima-tpf")
+def get_anbima_tpf(instrument: str | None = None):
+    """Retorna registros ANBIMA dos titulos publicos.
+
+    Args:
+        instrument: filtra por LTN, LFT, NTN-B, NTN-C, NTN-F. None = todos.
+
+    Use para:
+    - Popular taxa default de TPF na UI (substituir digitacao manual)
+    - Listar vencimentos disponiveis no mercado secundario ANBIMA
+    - Validar PU calculado vs PU oficial
+    """
+    records = anbima_fetchers.fetch_anbima_tpf_txt()
+    if instrument:
+        records = [r for r in records if r.instrument == instrument.upper()]
+    if not records:
+        return {"source": "anbima.com.br", "data_ref": None, "records": []}
+    return {
+        "source": "anbima.com.br",
+        "data_ref": records[0].data_ref.strftime("%Y-%m-%d"),
+        "records": [r.to_dict() for r in records],
+    }
 
 
 # ---------------------------------------------------------------------------
