@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Simulador de Títulos Públicos Federais e Derivativos — LTN, NTN-F, NTN-B, LFT, DI1, DAP, DOL, DDI, FRC">
-    <meta name="theme-color" content="#0d1117">
+    <meta name="theme-color" content="#0f1523">
     <meta name="color-scheme" content="dark">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <title>Treasury Expert — Simulador TPF + Derivativos</title>
@@ -41,8 +41,8 @@
                 <input type="number" id="spotInput" value="4.9724" step="0.0001" min="0">
             </div>
             <button class="btn-primary" id="btnFetchMarket" onclick="fetchMarketData()">Atualizar</button>
-            <div class="mkt-inline" id="mktIndicators"></div>
         </div>
+        <div class="mkt-strip" id="mktIndicators"></div>
 
         <!-- Tab: Simulador -->
         <div id="tab-sim" role="tabpanel">
@@ -62,14 +62,22 @@
                 </div>
             </div>
 
+            <!-- Collapsible legs editor — accessible from any sub-tab -->
+            <div class="legs-panel" id="legsPanel">
+                <div class="legs-panel-header" onclick="toggleLegsPanel()">
+                    <span>Pernas da Operação</span>
+                    <span class="legs-panel-toggle" id="legsPanelToggle">&#9662;</span>
+                </div>
+                <div class="legs-panel-body" id="legsPanelBody">
+                    <div class="presets" id="presets"></div>
+                    <div id="legsHeader" class="leg-row is-header" style="margin-bottom:4px"></div>
+                    <div id="legsContainer" class="legs-container"></div>
+                    <button class="btn-add" onclick="addLeg()">+ Adicionar Perna</button>
+                </div>
+            </div>
+
             <!-- Sub-aba: Pernas & Resumo -->
             <div id="subtab-pernas" role="tabpanel">
-                <div class="presets" id="presets"></div>
-                <div class="sec-h">Pernas da Operação</div>
-                <div id="legsHeader" class="leg-row is-header" style="margin-bottom:4px"></div>
-                <div id="legsContainer" class="legs-container"></div>
-                <button class="btn-add" onclick="addLeg()">+ Adicionar Perna</button>
-                <hr class="divider">
                 <div id="metricsArea"></div>
                 <div class="sec-h">Ativo vs Passivo</div>
                 <div id="avTable"></div>
@@ -80,15 +88,7 @@
             <div id="subtab-cenarios" role="tabpanel" style="display:none">
                 <div class="charts-grid" id="chartsGrid"></div>
                 <div id="decompositionPanel" class="decomposition-panel"></div>
-                <div id="pnlBarsChart"></div>
                 <div id="mtmTable"></div>
-                <div class="two-col">
-                    <div id="pnlConsolidatedChart"></div>
-                    <div>
-                        <div id="pnlPerLegToggle" style="margin-bottom:8px"></div>
-                        <div id="pnlPerLegChart"></div>
-                    </div>
-                </div>
             </div>
 
             <!-- Sub-aba: Detalhes & Hedge -->

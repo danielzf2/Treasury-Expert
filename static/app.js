@@ -3,17 +3,27 @@
 const ALL_INSTRUMENTS = ["LTN","NTN-F","NTN-B","LFT","DI1","DAP","DOL","DDI","FRC"];
 const CORR_TYPES = ["Nenhuma","% na taxa","R$/contrato","R$/titulo"];
 const SCENARIOS = {
-    parallel:"Paralelo", steep:"Steepener", flat:"Flattener", fly:"Butterfly", custom:"Custom"
+    bear_par:   "Bear Parallel — taxas sobem paralelamente",
+    bull_par:   "Bull Parallel — taxas caem paralelamente",
+    bear_steep: "Bear Steepener — longos sobem mais que curtos",
+    bull_steep: "Bull Steepener — curtos caem mais que longos",
+    bear_flat:  "Bear Flattener — curtos sobem mais que longos",
+    bull_flat:  "Bull Flattener — longos caem mais que curtos",
+    pos_fly:    "Positive Butterfly — barriga sobe, pontas caem",
+    neg_fly:    "Negative Butterfly — barriga cai, pontas sobem",
+    custom:     "Custom — combina paralelo, inclinação e curvatura",
 };
 const SCENARIO_DESCS = {
-    parallel:"Shift paralelo. Positivo = taxas sobem, negativo = taxas caem.",
-    steep:"Inclinação. Positivo = longos sobem mais que curtos, negativo = curtos caem mais que longos.",
-    flat:"Achatamento. Positivo = curtos sobem mais que longos, negativo = longos caem mais que curtos.",
-    fly:"Curvatura (butterfly). Positivo = barriga sobe / pontas caem, negativo = oposto.",
-    custom:"Combina paralelo, inclinação e curvatura livremente.",
+    bear_par:"Todas as taxas sobem de forma paralela. Bom para posições vendidas em duration.",
+    bull_par:"Todas as taxas caem de forma paralela. Bom para posições compradas em duration.",
+    bear_steep:"Longos sobem mais que curtos. Captura abertura de prêmio de prazo.",
+    bull_steep:"Curtos caem mais que longos. Mostra exposição quando o vértice curto lidera o rally.",
+    bear_flat:"Curtos sobem mais que longos. Útil em choque de política monetária no front-end.",
+    bull_flat:"Longos caem mais que curtos. Útil para testar fechamento da parte longa.",
+    pos_fly:"Barriga sobe e pontas caem. Testa risco de curvatura contra posições no miolo.",
+    neg_fly:"Barriga cai e pontas sobem. Testa ganho/perda em estruturas compradas na barriga.",
+    custom:"Combine paralelo, inclinação e curvatura livremente com os sliders.",
 };
-const _SCENARIO_POS_MAP = { parallel:"bear_par", steep:"bear_steep", flat:"bear_flat", fly:"pos_fly" };
-const _SCENARIO_NEG_MAP = { parallel:"bull_par", steep:"bull_steep", flat:"bull_flat", fly:"neg_fly" };
 
 function brDate() {
     const now = new Date();
@@ -41,22 +51,24 @@ const state = {
     anbimaTpfData: null,
     sourcesStatus: null,
     results: null,
-    scenarioKey: "parallel",
+    scenarioKey: "bear_par",
     magnitude: 10,
     customParallel: 0, customSlope: 0, customCurvature: 0,
     deltaFx: 0, deltaIpca: 0, deltaCupom: 0,
     expandFlows: false,
     activeTab: "sim",
     activeSimSubTab: "pernas",
-    decompositionMode: "minimal",
+    decompositionMode: "rich",
 };
 
 async function init() {
     document.getElementById("dataNeg").value = brDate();
-    const resp = await fetch("/sim/presets");
-    state.presets = await resp.json();
+    const [presetsResp] = await Promise.all([
+        fetch("/sim/presets").then(r => r.json()),
+        fetchMarketData(),
+    ]);
+    state.presets = presetsResp;
     renderPresets();
-    await fetchMarketData();
     applyPreset(Object.keys(state.presets)[0]);
 }
 
@@ -95,6 +107,10 @@ function toggleMobileNav() {
     document.getElementById("mainNav").classList.toggle("open");
 }
 
+function toggleLegsPanel() {
+    document.getElementById("legsPanel").classList.toggle("collapsed");
+}
+
 function switchSimSubTab(name) {
     state.activeSimSubTab = name;
     document.querySelectorAll("#simSubTabs button").forEach((b, i) => {
@@ -104,21 +120,35 @@ function switchSimSubTab(name) {
     document.getElementById("subtab-cenarios").style.display = name === "cenarios" ? "" : "none";
     document.getElementById("subtab-detalhes").style.display = name === "detalhes" ? "" : "none";
 
-    if (name === "cenarios" || name === "detalhes") {
+    const lp = document.getElementById("legsPanel");
+    if (lp) {
+        if (name === "pernas") lp.classList.remove("collapsed");
+        else lp.classList.add("collapsed");
+    }
+
+    if (name === "cenarios") {
+        requestAnimationFrame(() => {
+            resizeScenarioCharts();
+            if (state._chartsDirty) { state._chartsDirty = false; loadCharts(); }
+        });
+    } else if (name === "detalhes") {
         requestAnimationFrame(() => resizeScenarioCharts());
     }
 }
 
 function resizeScenarioCharts() {
-    const ids = ["chartCurve", "chartCupom", "chartForward", "chartReal",
-                 "pnlBarsChart", "pnlConsolidatedChart", "pnlPerLegChart"];
-    ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (el && el._fullLayout) Plotly.Plots.resize(id);
-    });
-    document.querySelectorAll('[id^="krdChart"]').forEach(el => {
-        if (el._fullLayout) Plotly.Plots.resize(el.id);
-    });
+    const ids = ["chartCurve", "chartCupom", "chartForward", "chartReal"];
+    function doResize() {
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el._fullLayout) try { Plotly.Plots.resize(id); } catch(e) {}
+        });
+        document.querySelectorAll('[id^="krdChart"]').forEach(el => {
+            if (el._fullLayout) try { Plotly.Plots.resize(el.id); } catch(e) {}
+        });
+    }
+    doResize();
+    setTimeout(doResize, 150);
 }
 
 const _tickerCache = {};
@@ -502,7 +532,7 @@ function renderAvTable(r) {
     userLegs.forEach(l => {
         const isBuy = l.direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
-        const dirColor = isBuy ? "#3fb950" : "#f85149";
+        const dirColor = isBuy ? "#34d399" : "#ff6b6b";
         html += `<tr><td><span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
             <td class="bold">${l.instrument}</td>
             <td class="tc mono av-col-ativo">${markCancelled(l.exp_ativo)}</td>
@@ -513,7 +543,7 @@ function renderAvTable(r) {
     if (aggregateAuto) {
         const isBuy = autoLegs[0].direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
-        const dirColor = isBuy ? "#3fb950" : "#f85149";
+        const dirColor = isBuy ? "#34d399" : "#ff6b6b";
         const hedgeInst = autoLegs[0].instrument;
         const minVcto = autoLegs[0].parsed_label;
         const maxVcto = autoLegs[autoLegs.length-1].parsed_label;
@@ -526,7 +556,7 @@ function renderAvTable(r) {
         autoLegs.forEach(l => {
             const isBuy = l.direction === "C";
             const dirLabel = isBuy ? "Compra" : "Venda";
-            const dirColor = isBuy ? "#3fb950" : "#f85149";
+            const dirColor = isBuy ? "#34d399" : "#ff6b6b";
             html += `<tr style="opacity:0.7"><td><span class="auto-badge">AUTO</span> <span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
                 <td class="bold">${l.instrument}</td>
                 <td class="tc mono av-col-ativo">${markCancelled(l.exp_ativo)}</td>
@@ -565,7 +595,7 @@ function renderAvTable(r) {
 
     if (r.strategy.economic_description) {
         const name = r.strategy.name ? `<span style="color:#58a6ff;font-weight:600">${r.strategy.name}</span> — ` : "";
-        html += `<tr class="av-econ"><td colspan="5" style="padding:8px 12px;font-size:11.5px;line-height:1.5;color:#8b949e;border-top:1px dashed rgba(100,100,100,0.2)">${name}${r.strategy.economic_description}</td></tr>`;
+        html += `<tr class="av-econ"><td colspan="5" style="padding:8px 12px;font-size:11.5px;line-height:1.5;color:#7a8ba0;border-top:1px dashed rgba(100,100,100,0.2)">${name}${r.strategy.economic_description}</td></tr>`;
     }
     html += `</table></div>`;
     el.innerHTML = html;
@@ -743,7 +773,7 @@ function renderHedge(r) {
     html += '</table></div>';
 
     if (h.strip && h.strip.length) {
-        html += `<div style="margin-top:12px"><p style="font-size:12px;color:#8b949e;margin-bottom:4px">Detalhamento do Strip — ${inst} por fluxo de ${tpfInst}</p>`;
+        html += `<div style="margin-top:12px"><p style="font-size:12px;color:#7a8ba0;margin-bottom:4px">Detalhamento do Strip — ${inst} por fluxo de ${tpfInst}</p>`;
         html += '<div style="overflow-x:auto"><table class="sim-tbl">';
         html += `<tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">PV Fluxo</th><th class="tr">DV01 Fluxo</th><th class="tr">DV01/${inst}</th><th class="tr">Contratos ${inst}</th></tr>`;
         let totalDv01 = 0, totalN = 0;
@@ -776,14 +806,17 @@ function renderScenarios() {
     if (bar) bar.style.display = "";
     renderScenarioRadio();
     renderSliders();
+    state._chartsDirty = true;
     loadCharts();
 }
 
 function renderScenarioRadio() {
     const el = document.getElementById("scenarioRadio");
-    el.innerHTML = Object.entries(SCENARIOS).map(([k,v]) =>
-        `<label><input type="radio" name="scenario" value="${k}" ${k===state.scenarioKey?"checked":""} onchange="changeScenario('${k}')"><span>${v}</span></label>`
-    ).join("");
+    el.innerHTML = `<select class="scenario-select" onchange="changeScenario(this.value)">
+        ${Object.entries(SCENARIOS).map(([k,v]) =>
+            `<option value="${k}" ${k===state.scenarioKey?"selected":""}>${v}</option>`
+        ).join("")}
+    </select>`;
     document.getElementById("scenarioDesc").textContent = SCENARIO_DESCS[state.scenarioKey] || "";
 }
 
@@ -801,14 +834,13 @@ function renderSliders() {
     const hasFx = r.legs.some(l => l.instrument === "DOL");
 
     const el = document.getElementById("slidersPanel");
-    const sliderLabels = {parallel:"Δ Taxa (bps)", steep:"Δ Inclinação (bps)", flat:"Δ Achatamento (bps)", fly:"Δ Curvatura (bps)"};
     let html = '';
     if (state.scenarioKey === "custom") {
         html += sliderHtml("Paralelo (bps)", "customParallel", state.customParallel, -50, 50, 1);
         html += sliderHtml("Inclinação (bps)", "customSlope", state.customSlope, -50, 50, 1);
         html += sliderHtml("Curvatura (bps)", "customCurvature", state.customCurvature, -50, 50, 1);
     } else {
-        html += sliderHtml(sliderLabels[state.scenarioKey] || "Cenário (bps)", "magnitude", state.magnitude, -50, 50, 1);
+        html += sliderHtml("Magnitude (bps)", "magnitude", state.magnitude, -50, 50, 1);
     }
     if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5);
     if (hasIpca) html += sliderHtml("Taxa Real (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1);
@@ -824,10 +856,15 @@ function sliderHtml(label, key, val, min, max, step) {
     </div>`;
 }
 
-function _backendScenario() {
-    if (state.scenarioKey === "custom") return { scenario_key:"custom", magnitude:state.magnitude };
-    const map = state.magnitude >= 0 ? _SCENARIO_POS_MAP : _SCENARIO_NEG_MAP;
-    return { scenario_key: map[state.scenarioKey] || state.scenarioKey, magnitude: Math.abs(state.magnitude) };
+function _scenarioShortName(key) {
+    const m = {
+        bear_par:"Bear Parallel", bull_par:"Bull Parallel",
+        bear_steep:"Bear Steepener", bull_steep:"Bull Steepener",
+        bear_flat:"Bear Flattener", bull_flat:"Bull Flattener",
+        pos_fly:"Positive Butterfly", neg_fly:"Negative Butterfly",
+        custom:"Custom",
+    };
+    return m[key] || key;
 }
 
 function _scenarioLabel() {
@@ -838,18 +875,16 @@ function _scenarioLabel() {
         if (state.customCurvature) p.push(`C${state.customCurvature>0?"+":""}${state.customCurvature}`);
         return p.length ? `Custom ${p.join(" ")}` : "Custom 0";
     }
-    const name = SCENARIOS[state.scenarioKey] || state.scenarioKey;
     const m = state.magnitude;
-    return `${name} ${m>=0?"+":""}${m} bps`;
+    return `${_scenarioShortName(state.scenarioKey)} ${m>=0?"+":""}${m} bps`;
 }
 
 function _scenarioBase() {
     const r = state.results;
-    const sc = _backendScenario();
     return {
         legs: r ? r.legs : [],
-        scenario_key: sc.scenario_key,
-        magnitude: sc.magnitude,
+        scenario_key: state.scenarioKey,
+        magnitude: state.magnitude,
         delta_fx_pct: state.deltaFx,
         delta_ipca_bps: state.deltaIpca,
         delta_cupom_bps: state.deltaCupom,
@@ -931,13 +966,15 @@ async function loadCharts() {
 
     const plotCfg = {displayModeBar:false, responsive:true};
 
-    async function safeChart(url, body, divId) {
+    async function safeChart(url, body, divId, maxH) {
         try {
             const resp = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
             if (!resp.ok) { console.error(url, resp.status, await resp.text()); return null; }
             const fig = await resp.json();
             if (fig.data && divId && document.getElementById(divId)) {
-                await Plotly.newPlot(divId, fig.data, fig.layout, plotCfg);
+                const layout = fig.layout || {};
+                if (maxH) layout.height = Math.min(layout.height || 400, maxH);
+                await Plotly.newPlot(divId, fig.data, layout, plotCfg);
                 requestAnimationFrame(() => Plotly.Plots.resize(divId));
             }
             return fig;
@@ -951,11 +988,7 @@ async function loadCharts() {
     const charts = _activeCharts(r.legs, r.strategy);
     const chartPromises = charts.map(c => safeChart(c.url, c.body, c.divId));
 
-    // P&L charts e MtM table em paralelo
-    const [pnl, cons, perLeg, mtm, dec] = await Promise.all([
-        safeChart("/sim/charts/pnl-bars", base, "pnlBarsChart"),
-        safeChart("/sim/charts/pnl-consolidated", base, "pnlConsolidatedChart"),
-        safeChart("/sim/charts/pnl-per-leg", {...base, expand_flows: !!state.expandFlows}, "pnlPerLegChart"),
+    const [mtm, dec] = await Promise.all([
         safeChart("/sim/mtm-table", base, null),
         safeChart("/sim/scenario-decomposition", base, null),
     ]);
@@ -973,21 +1006,8 @@ async function loadCharts() {
     if (mtm && mtm.flow_pnl) renderCashflows(r, mtm.flow_pnl);
 
     if (dec) renderDecomposition(dec);
-    renderPnlPerLegToggle();
 }
 
-function renderPnlPerLegToggle() {
-    const r = state.results;
-    if (!r) return;
-    const hasCoupon = r.legs.some(l => ["NTN-F","NTN-B"].includes(l.instrument) && !l.auto);
-    const el = document.getElementById("pnlPerLegToggle");
-    if (!el) return;
-    if (!hasCoupon) { el.innerHTML = ""; return; }
-    el.innerHTML = `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8b949e;cursor:pointer">
-        <input type="checkbox" ${state.expandFlows?"checked":""} onchange="state.expandFlows=this.checked;loadCharts()" style="cursor:pointer">
-        Detalhar P&L por fluxo (cupons + principal) na NTN-F/NTN-B
-    </label>`;
-}
 
 function _fmtBRL(v, dec) {
     dec = dec === undefined ? 2 : dec;
@@ -1000,16 +1020,69 @@ function _pnlClass(v) { return v >= 0 ? "pnl-pos" : "pnl-neg"; }
 
 function _dirLabel(d) { return d === "C" ? "C" : "V"; }
 
+function _aggregateAutoDecLegs(decLegs, resultLegs) {
+    /* Agrega pernas AUTO (ex: strip de hedge) por fator pra nao poluir a decomposicao.
+       Soma DV01 + P&L, faz media ponderada de taxas/PU. */
+    const autoCount = (resultLegs || []).filter(l => l.auto).length;
+    if (autoCount < 3) return decLegs;
+
+    const autoKeys = new Set();
+    resultLegs.forEach(l => {
+        if (l.auto) autoKeys.add(`${l.direction}|${l.instrument}|${l.parsed_label}`);
+    });
+
+    const result = [];
+    const autoByFactor = {};
+    decLegs.forEach(l => {
+        const k = `${l.direction}|${l.instrument}|${l.label}`;
+        if (!autoKeys.has(k)) { result.push(l); return; }
+        const fk = l.factor;
+        if (!autoByFactor[fk]) {
+            autoByFactor[fk] = {
+                direction: l.direction,
+                instrument: `AUTO ${l.instrument} (${autoCount})`,
+                label: "Strip",
+                factor: l.factor,
+                delta_value: l.delta_value,
+                delta_unit: l.delta_unit,
+                rate_before: 0, rate_after: 0, pu_before: 0, pu_after: 0,
+                dv01: 0, pnl_linear: 0, pnl_real: 0, pnl_convex_diff: 0,
+                _w: 0,
+            };
+        }
+        const a = autoByFactor[fk];
+        a.dv01 += l.dv01;
+        a.pnl_linear += l.pnl_linear;
+        a.pnl_real += l.pnl_real;
+        a.pnl_convex_diff += l.pnl_convex_diff;
+        const w = Math.abs(l.dv01) || 1;
+        a.rate_before += l.rate_before * w;
+        a.rate_after += l.rate_after * w;
+        a.pu_before += l.pu_before * w;
+        a.pu_after += l.pu_after * w;
+        a._w += w;
+    });
+    Object.values(autoByFactor).forEach(a => {
+        if (a._w > 0) {
+            a.rate_before /= a._w; a.rate_after /= a._w;
+            a.pu_before /= a._w;   a.pu_after /= a._w;
+        }
+        result.push(a);
+    });
+    return result;
+}
+
 function renderDecomposition(dec) {
     /* Painel de decomposicao numerica abaixo dos charts.
        state.decompositionMode = 'minimal' | 'rich' */
     const el = document.getElementById("decompositionPanel");
     if (!el || !dec) return;
+    const legsAgg = _aggregateAutoDecLegs(dec.legs, state.results ? state.results.legs : []);
 
     const mode = state.decompositionMode || "minimal";
     const headerHtml = `
         <div class="decomposition-head">
-            <h3 style="color:#d29922">Decomposição por perna <span class="muted" style="font-weight:400;font-size:11px">— efeito do cenário aplicado a cada fator</span></h3>
+            <h3 style="color:#f5a623">Decomposição por perna <span class="muted" style="font-weight:400;font-size:11px">— efeito do cenário aplicado a cada fator</span></h3>
             <div style="display:flex;gap:6px">
                 <button class="btn-toggle ${mode==='minimal'?'active':''}" onclick="state.decompositionMode='minimal';renderDecomposition(window._lastDecomposition)">Minimal</button>
                 <button class="btn-toggle ${mode==='rich'?'active':''}" onclick="state.decompositionMode='rich';renderDecomposition(window._lastDecomposition)">Detalhar</button>
@@ -1018,7 +1091,7 @@ function renderDecomposition(dec) {
 
     let body;
     if (mode === "rich") {
-        const rows = dec.legs.map(l => {
+        const rows = legsAgg.map(l => {
             const isPct = l.delta_unit === "%";
             const rateFmt = isPct
                 ? `${l.rate_before.toFixed(4)} → ${l.rate_after.toFixed(4)}`
@@ -1054,7 +1127,7 @@ function renderDecomposition(dec) {
         </table>`;
     } else {
         // minimal: 1 linha por perna
-        const rows = dec.legs.map(l => {
+        const rows = legsAgg.map(l => {
             const isPct = l.delta_unit === "%";
             const deltaStr = `${l.delta_value >= 0 ? "+" : ""}${l.delta_value.toFixed(2)}${l.delta_unit === "bps" ? " bps" : "%"}`;
             const rateStr = isPct
@@ -1091,11 +1164,11 @@ function renderMtmTable(table, legs) {
         autoIdxs.forEach(i => cols.push({label: `AUTO ${legs[i].instrument} ${legs[i].parsed_label}`, idxs: [i], isAuto: true}));
     }
 
-    let html = '<div class="sim-card scenario-card"><div class="sim-card-h">Tabela de Cenários MtM — per-leg P&L</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
+    let html = '<div class="sim-card scenario-card"><div class="sim-card-h">Tabela de Cenários MtM</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
     cols.forEach(c => html += `<th class="tr${c.isAuto?' muted':''}">${c.label}</th>`);
     html += '<th class="tr bold">Total</th></tr>';
     table.forEach(row => {
-        const bg = row.delta === 0 ? ' style="background:#1c2128"' : '';
+        const bg = row.delta === 0 ? ' style="background:#152035"' : '';
         html += `<tr${bg}><td class="tc mono">${row.delta}</td>`;
         cols.forEach(c => {
             const pnl = c.idxs.reduce((s, i) => s + (row.pnls[i] || 0), 0);
@@ -1288,10 +1361,10 @@ function renderAnbimaTpfTables() {
 }
 
 function renderMktTable(title, data, cols) {
-    if (!data || !data.length) return `<div><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><p class="muted">Sem dados</p></div>`;
+    if (!data || !data.length) return `<div style="margin-bottom:24px"><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><p class="muted">Sem dados</p></div>`;
     const numericCols = new Set(["last","bid","ask","ajuste"]);
     const colCls = c => numericCols.has(c) ? "tr" : (c === "vcto" ? "tc" : "");
-    let html = `<div><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><div style="overflow-x:auto;max-height:400px"><table class="sim-tbl"><tr>`;
+    let html = `<div style="margin-bottom:24px"><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><div style="overflow:auto;max-height:400px;border:1px solid #243049;border-radius:8px"><table class="sim-tbl"><tr>`;
     cols.forEach(c => html += `<th class="${colCls(c)}">${c}</th>`);
     html += "</tr>";
     data.forEach(row => {
