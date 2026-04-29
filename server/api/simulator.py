@@ -15,7 +15,7 @@ from lib.calendar import parse_ticker, du_entre, dc_entre, default_liq_date
 from lib.market_data import fetch_all, get_tpf_vctos, find_di1_rate_for_date, MarketSnapshot
 from lib.instruments import INSTRUMENTS, pu, duration, dv01, key_rate_duration, cupom_cambial_implicito
 from lib.exposure import get_exposure, detect_strategy, analyze_risk_factors, suggest_hedge
-from lib.scenarios import SCENARIOS, calc_scenario_delta, calc_leg_pnl
+from lib.scenarios import SCENARIOS, calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow
 from lib.charts import (
     chart_curva_antes_depois, chart_pnl_barras,
     chart_pnl_consolidado, chart_pnl_por_perna,
@@ -339,6 +339,9 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
             "corr_type": corr_type,
             "corr_value": corr_value,
             "vna": leg_vna,
+            "hedge_mode": leg.get("hedge_mode", "manual"),
+            "auto": leg.get("auto", False),
+            "auto_for": leg.get("auto_for"),
             "info": info,
             "parsed": parsed,
             "du": du_val,
@@ -362,6 +365,122 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
         results.append(processed)
 
     return results
+
+
+def _ticker_for_du(du: int, liq_date: date) -> str:
+    """Approximate ticker from a DU offset from liq_date."""
+    from datetime import timedelta
+    target_dc = round(du * 365 / 252)
+    target_date = liq_date + timedelta(days=target_dc)
+    return f"{_MONTH_TO_TICKER[target_date.month]}{target_date.year % 100:02d}"
+
+
+def _expand_hedge_legs(processed_legs: list[dict],
+                       di1_curve: list[dict], dap_curve: list[dict],
+                       data_neg_str: str, spot: float) -> list[dict]:
+    """Expand TPF legs with hedge_mode != manual by inserting auto DI1/DAP legs.
+
+    Filters out any pre-existing auto legs (regenerates from scratch each call).
+    Returns a new list with auto-generated legs inserted immediately after their TPF.
+    """
+    from lib.curves import flat_forward_interp, build_di_vertices, build_dap_vertices
+
+    processed_legs = [l for l in processed_legs if not l.get("auto")]
+
+    data_neg = date.fromisoformat(data_neg_str)
+    liq = default_liq_date(data_neg)
+
+    di_vertices = build_di_vertices(di1_curve, liq) if di1_curve else []
+    dap_vertices = build_dap_vertices(dap_curve, liq) if dap_curve else []
+
+    def _rate_at_du(du: int, hedge_inst: str, fallback: float) -> float:
+        verts = dap_vertices if hedge_inst == "DAP" else di_vertices
+        r = flat_forward_interp(verts, du) if verts else None
+        return r if r is not None else fallback
+
+    expanded: list[dict] = []
+    for idx, leg in enumerate(processed_legs):
+        expanded.append(leg)
+        info = leg.get("info") or INSTRUMENTS.get(leg.get("instrument"))
+        if not info or info.cup_sem <= 0:
+            continue
+        mode = leg.get("hedge_mode", "manual")
+        if mode == "manual":
+            continue
+
+        hedge_inst = "DAP" if leg["instrument"] == "NTN-B" else "DI1"
+
+        if mode in ("maturity", "duration"):
+            target_du = leg["du"] if mode == "maturity" else round(leg["d_mac"] * 252)
+            target_du = max(1, target_du)
+            taxa = _rate_at_du(target_du, hedge_inst, leg["taxa"])
+            ticker = _ticker_for_du(target_du, liq)
+
+            auto_input = {
+                "instrument": hedge_inst,
+                "ticker": ticker,
+                "direction": leg["direction"],
+                "quantity": 0,
+                "taxa": taxa,
+                "corr_type": "Nenhuma",
+                "corr_value": 0.0,
+                "auto": True,
+                "auto_for": idx,
+                "hedge_mode": "manual",
+            }
+            auto_processed = _process_raw_legs([auto_input], data_neg_str, spot)
+            if not auto_processed:
+                continue
+            ap = auto_processed[0]
+            di_unit_dv01 = ap["dv01_unit"]
+            n = round(leg["dv01_total"] / di_unit_dv01) if di_unit_dv01 else 0
+
+            auto_input["quantity"] = n
+            ap2 = _process_raw_legs([auto_input], data_neg_str, spot)
+            if ap2:
+                expanded.append(ap2[0])
+
+        elif mode == "strip":
+            cf = leg.get("cashflows") or {}
+            flows = cf.get("flows") or []
+            if not flows:
+                continue
+            tir = leg["taxa"] / 100
+            for f in flows:
+                target_du = max(1, f["du"])
+                taxa = _rate_at_du(target_du, hedge_inst, leg["taxa"])
+                ticker = _ticker_for_du(target_du, liq)
+
+                t = target_du / 252
+                pv_flow = f["pv"]
+                d_mod_flow = t / (1 + tir)
+                dv01_flow = d_mod_flow * pv_flow * 0.0001 * leg["quantity"]
+
+                temp_input = {
+                    "instrument": hedge_inst,
+                    "ticker": ticker,
+                    "direction": leg["direction"],
+                    "quantity": 1,
+                    "taxa": taxa,
+                    "corr_type": "Nenhuma",
+                    "corr_value": 0.0,
+                    "auto": True,
+                    "auto_for": idx,
+                    "hedge_mode": "manual",
+                }
+                ap_one = _process_raw_legs([temp_input], data_neg_str, spot)
+                if not ap_one:
+                    continue
+                unit_dv01 = ap_one[0]["dv01_unit"]
+                n = round(dv01_flow / unit_dv01) if unit_dv01 else 0
+                if n == 0:
+                    continue
+                temp_input["quantity"] = n
+                ap_full = _process_raw_legs([temp_input], data_neg_str, spot)
+                if ap_full:
+                    expanded.append(ap_full[0])
+
+    return expanded
 
 
 def _rehydrate_legs(legs: list[dict]) -> list[dict]:
@@ -400,12 +519,17 @@ class LegInput(BaseModel):
     corr_type: str = "Nenhuma"
     corr_value: float = 0.0
     vna: float | None = None
+    hedge_mode: str = "manual"  # manual | maturity | duration | strip
+    auto: bool = False
+    auto_for: int | None = None
 
 
 class ProcessRequest(BaseModel):
     legs: list[LegInput]
     data_neg: str
     spot: float
+    di1: list[dict] = []
+    dap: list[dict] = []
 
 
 class CurveChartRequest(BaseModel):
@@ -429,6 +553,8 @@ class PnlBarsRequest(BaseModel):
     custom_parallel_bps: float = 0.0
     custom_slope_bps: float = 0.0
     custom_curvature_bps: float = 0.0
+    di1: list[dict] = []
+    dap: list[dict] = []
 
 
 class PnlConsolidatedRequest(BaseModel):
@@ -441,6 +567,9 @@ class PnlConsolidatedRequest(BaseModel):
     custom_parallel_bps: float = 0.0
     custom_slope_bps: float = 0.0
     custom_curvature_bps: float = 0.0
+    di1: list[dict] = []
+    dap: list[dict] = []
+    expand_flows: bool = False
 
 
 class CupomChartRequest(BaseModel):
@@ -475,6 +604,8 @@ class MtmTableRequest(BaseModel):
     custom_parallel_bps: float = 0.0
     custom_slope_bps: float = 0.0
     custom_curvature_bps: float = 0.0
+    di1: list[dict] = []
+    dap: list[dict] = []
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +637,8 @@ def process(req: ProcessRequest):
     valid = _process_raw_legs(legs_input, req.data_neg, req.spot)
     if not valid:
         raise HTTPException(status_code=400, detail="No valid legs to process")
+
+    valid = _expand_hedge_legs(valid, req.di1, req.dap, req.data_neg, req.spot)
 
     strat = detect_strategy(valid, req.spot)
     risk_factors = analyze_risk_factors(valid, strat)
@@ -565,6 +698,8 @@ def chart_pnl_bars(req: PnlBarsRequest):
         custom_parallel_bps=req.custom_parallel_bps,
         custom_slope_bps=req.custom_slope_bps,
         custom_curvature_bps=req.custom_curvature_bps,
+        di1_curve=req.di1 or None,
+        dap_curve=req.dap or None,
     )
     return json.loads(fig.to_json())
 
@@ -586,6 +721,8 @@ def chart_pnl_consolidated(req: PnlConsolidatedRequest):
         custom_parallel_bps=req.custom_parallel_bps,
         custom_slope_bps=req.custom_slope_bps,
         custom_curvature_bps=req.custom_curvature_bps,
+        di1_curve=req.di1 or None,
+        dap_curve=req.dap or None,
     )
     return json.loads(fig.to_json())
 
@@ -607,6 +744,9 @@ def chart_pnl_per_leg(req: PnlConsolidatedRequest):
         custom_parallel_bps=req.custom_parallel_bps,
         custom_slope_bps=req.custom_slope_bps,
         custom_curvature_bps=req.custom_curvature_bps,
+        di1_curve=req.di1 or None,
+        dap_curve=req.dap or None,
+        expand_flows=req.expand_flows,
     )
     return json.loads(fig.to_json())
 
@@ -677,46 +817,33 @@ _MTM_STEPS = [-20, -15, -10, -5, -2, -1, 0, 1, 2, 5, 10, 15, 20]
 
 
 def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
-                      du_min: int, du_max: int) -> dict | None:
-    cashflows = leg.get("cashflows") or {}
-    flows = cashflows.get("flows") or []
-    if not flows:
-        return None
-
+                      du_min: int, du_max: int,
+                      spot_curve: list) -> dict | None:
+    """Compute per-cashflow P&L using calc_leg_pnl_per_flow with the spot curve."""
     info = leg.get("info") or INSTRUMENTS.get(leg.get("instrument"))
-    if not info or info.type != "tpf":
+    if not info or info.type != "tpf" or info.cup_sem <= 0:
+        return None
+    if not spot_curve:
         return None
 
-    sign = 1 if leg["direction"] == "C" else -1
-    base_rate = leg["tax_fin"]
-
-    leg_delta = calc_scenario_delta(
-        leg["du"], du_min, du_max, req.scenario_key, req.magnitude,
+    res = calc_leg_pnl_per_flow(
+        leg, req.scenario_key, req.magnitude, du_min, du_max, spot_curve,
         req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+        req.delta_ipca_bps,
     )
-    inst = leg.get("instrument", "")
-    if inst in ("NTN-B",) and req.delta_ipca_bps != 0:
-        leg_delta = req.delta_ipca_bps
-
-    old_rate = base_rate / 100
-    new_rate = (base_rate + leg_delta / 100) / 100
+    if not res:
+        return None
 
     rows = []
-    total = 0.0
-    for f in flows:
-        t = f["du"] / 252
-        old_pv = f["nominal"] / (1 + old_rate) ** t
-        new_pv = f["nominal"] / (1 + new_rate) ** t
-        pnl = sign * (new_pv - old_pv) * leg["quantity"]
-        total += pnl
+    for f in res["flows"]:
         rows.append({
             "label": f["label"],
-            "payment_date": f.get("payment_date", ""),
+            "payment_date": f["payment_date"].strftime("%d/%m/%Y") if f["payment_date"] else "",
             "du": f["du"],
-            "nominal": f["nominal"],
-            "pv": old_pv,
-            "delta_bps": leg_delta,
-            "pnl": round(pnl, 2),
+            "nominal": None,
+            "pv": f["old_pv"],
+            "delta_bps": f["delta_bps"],
+            "pnl": round(f["pnl_flow"], 2),
         })
 
     return {
@@ -724,27 +851,33 @@ def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
         "ticker": leg["ticker"],
         "parsed_label": leg.get("parsed_label") or leg.get("parsed", {}).get("label", ""),
         "direction": leg["direction"],
-        "total": round(total, 2),
+        "total": round(res["leg_pnl"], 2),
         "flows": rows,
+        "spread_credito": res.get("spread_credito"),
     }
 
 
 @router.post("/mtm-table")
 def mtm_table(req: MtmTableRequest):
+    from lib.scenarios import get_spot_curve_for_leg
+
     legs = _rehydrate_legs(req.legs)
 
     rate_legs = [l for l in legs if l["info"] and l["info"].conv != "price"]
     du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
     du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
 
+    spot_per_leg = [
+        get_spot_curve_for_leg(l, req.di1, req.dap, l.get("liq")) for l in legs
+    ]
+
     rows: list[dict] = []
     for m in _MTM_STEPS:
-        per_leg: list[dict] = []
         row_total = 0.0
-
         pnls = []
-        for l in legs:
-            if l["info"] and l["info"].conv == "price":
+        for li, l in enumerate(legs):
+            info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
+            if info and info.conv == "price":
                 delta = 0.0
             else:
                 delta = calc_scenario_delta(
@@ -752,12 +885,21 @@ def mtm_table(req: MtmTableRequest):
                     req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
                 )
 
-            pnl = calc_leg_pnl(
-                l, delta,
-                delta_fx_pct=req.delta_fx_pct,
-                delta_ipca_bps=req.delta_ipca_bps,
-                delta_cupom_bps=req.delta_cupom_bps,
-            )
+            spot = spot_per_leg[li]
+            if info and info.cup_sem > 0 and spot:
+                res = calc_leg_pnl_per_flow(
+                    l, req.scenario_key, m, du_min, du_max, spot,
+                    req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+                    req.delta_ipca_bps,
+                )
+                pnl = res["leg_pnl"] if res else 0.0
+            else:
+                pnl = calc_leg_pnl(
+                    l, delta,
+                    delta_fx_pct=req.delta_fx_pct,
+                    delta_ipca_bps=req.delta_ipca_bps,
+                    delta_cupom_bps=req.delta_cupom_bps,
+                )
             row_total += pnl
             pnls.append(round(pnl, 2))
 
@@ -768,7 +910,10 @@ def mtm_table(req: MtmTableRequest):
         })
 
     flow_pnl = [
-        fp for fp in (_flow_pnl_for_leg(l, req, du_min, du_max) for l in legs)
+        fp for fp in (
+            _flow_pnl_for_leg(l, req, du_min, du_max, spot_per_leg[li])
+            for li, l in enumerate(legs)
+        )
         if fp is not None
     ]
 

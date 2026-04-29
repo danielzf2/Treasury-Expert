@@ -10,7 +10,8 @@ Cenarios nomeados do mercado:
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
-from .instruments import INSTRUMENTS, pu
+from .instruments import INSTRUMENTS, pu, _coupon_cashflows
+from .curves import flat_forward_interp, build_di_vertices, build_dap_vertices
 
 
 @dataclass
@@ -183,3 +184,113 @@ def calc_leg_pnl(leg: dict, delta_bps: float,
         sign = -1 if leg["direction"] == "C" else 1
 
     return sign * diff * leg["quantity"]
+
+
+def calc_leg_pnl_per_flow(leg: dict,
+                          scenario_key: str, magnitude: float,
+                          du_min: int, du_max: int,
+                          spot_curve_vertices: list[tuple[int, float]],
+                          custom_parallel_bps: float = 0.0,
+                          custom_slope_bps: float = 0.0,
+                          custom_curvature_bps: float = 0.0,
+                          delta_ipca_bps: float = 0.0) -> dict | None:
+    """Per-cashflow MtM usando curva spot.
+
+    Para cada fluxo k:
+        i_k = curve(du_k) + spread_credito_constante
+        delta_k = scenario_delta(du_k)
+        old_pv_k = FC_k / (1 + i_k/100)^(du_k/252)
+        new_pv_k = FC_k / (1 + (i_k + delta_k)/100)^(du_k/252)
+
+    Soma dos new_pv_k = novo PU. P&L_perna = sign * (new_PU - old_PU) * qty.
+
+    Returns dict com:
+      - leg_pnl: P&L total da perna
+      - flows: [{label, du, old_pv, new_pv, delta_bps, pnl_flow}]
+
+    Returns None se nao for um titulo com cupom (use calc_leg_pnl).
+    """
+    info = INSTRUMENTS[leg["instrument"]]
+    if info.cup_sem <= 0:
+        return None
+    if not spot_curve_vertices:
+        return None
+
+    inst = leg["instrument"]
+    use_ipca = inst in ("NTN-B",)
+    base_delta_override = delta_ipca_bps if use_ipca and delta_ipca_bps != 0 else None
+
+    liq = _parse_leg_date(leg.get("liq"))
+    venc = leg.get("parsed", {}).get("date") if isinstance(leg.get("parsed"), dict) else None
+    leg_vna = leg.get("vna")
+    coupon_flows = _coupon_cashflows(inst, liq, venc, leg["du"])
+
+    if not coupon_flows:
+        return None
+
+    tir = leg["tax_fin"]
+    curve_at_maturity = flat_forward_interp(spot_curve_vertices, leg["du"])
+    if curve_at_maturity is None:
+        return None
+    spread = tir - curve_at_maturity
+
+    vna_scale = (leg_vna / 100) if (inst == "NTN-B" and leg_vna and leg_vna > 0) else 1.0
+
+    sign = 1 if leg["direction"] == "C" else -1
+
+    rows = []
+    old_pu = 0.0
+    new_pu = 0.0
+    for j, (payment_date, dui, nominal) in enumerate(coupon_flows, start=1):
+        spot_k = flat_forward_interp(spot_curve_vertices, dui)
+        if spot_k is None:
+            spot_k = curve_at_maturity
+        i_k = spot_k + spread
+
+        if base_delta_override is not None:
+            delta_k = base_delta_override
+        else:
+            delta_k = calc_scenario_delta(
+                dui, du_min, du_max, scenario_key, magnitude,
+                custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+            )
+
+        t = dui / 252
+        old_pv = nominal / (1 + i_k / 100) ** t
+        new_pv = nominal / (1 + (i_k + delta_k / 100) / 100) ** t
+
+        old_pv_brl = old_pv * vna_scale * leg["quantity"]
+        new_pv_brl = new_pv * vna_scale * leg["quantity"]
+        pnl_flow = sign * (new_pv_brl - old_pv_brl)
+
+        old_pu += old_pv
+        new_pu += new_pv
+
+        label = "Principal+Cupom" if j == len(coupon_flows) else f"Cupom {j}"
+        rows.append({
+            "label": label,
+            "payment_date": payment_date,
+            "du": dui,
+            "old_pv": old_pv * vna_scale,
+            "new_pv": new_pv * vna_scale,
+            "delta_bps": delta_k,
+            "pnl_flow": pnl_flow,
+        })
+
+    leg_pnl = sign * (new_pu - old_pu) * vna_scale * leg["quantity"]
+
+    return {
+        "leg_pnl": leg_pnl,
+        "old_pu": old_pu * vna_scale,
+        "new_pu": new_pu * vna_scale,
+        "flows": rows,
+        "spread_credito": spread,
+    }
+
+
+def get_spot_curve_for_leg(leg: dict, di1_curve: list, dap_curve: list, liq_date) -> list[tuple[int, float]]:
+    """Retorna a curva spot apropriada para a perna (DAP para NTN-B, DI1 para outros TPFs)."""
+    inst = leg.get("instrument")
+    if inst == "NTN-B":
+        return build_dap_vertices(dap_curve, liq_date) if dap_curve else []
+    return build_di_vertices(di1_curve, liq_date) if di1_curve else []

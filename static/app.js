@@ -48,6 +48,7 @@ const state = {
     magnitude: 10,
     customParallel: 0, customSlope: 0, customCurvature: 0,
     deltaFx: 0, deltaIpca: 0, deltaCupom: 0,
+    expandFlows: false,
     activeTab: "sim",
     activeChartTab: "curve",
 };
@@ -96,19 +97,33 @@ async function fetchTickers(instrument) {
     } catch(e) { return []; }
 }
 
+const HEDGE_MODES = [
+    {v: "manual", l: "Manual"},
+    {v: "maturity", l: "Vencimento"},
+    {v: "duration", l: "Duration"},
+    {v: "strip", l: "Strip (perfeito)"},
+];
+
 function renderLegs() {
     const hdr = document.getElementById("legsHeader");
-    hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","VNA","Corretagem","Valor",""].map(
+    hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","VNA","Hedge","Corretagem","Valor",""].map(
         h => `<div style="color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.3px">${h}</div>`
     ).join("");
 
     const c = document.getElementById("legsContainer");
     c.innerHTML = state.legs.map((leg, i) => {
         const isNTNB = leg.instrument === "NTN-B";
+        const isCoupon = leg.instrument === "NTN-F" || leg.instrument === "NTN-B";
         const vnaVal = leg.vna || "";
-        return `<div class="leg-row">
-            <div><select onchange="changeInstrument(${i},this.value)">${ALL_INSTRUMENTS.map(inst =>
-                `<option ${inst===leg.instrument?"selected":""}>${inst}</option>`).join("")}</select></div>
+        const hedgeMode = leg.hedge_mode || "manual";
+        const isAuto = !!leg.auto;
+        const rowCls = isAuto ? "leg-row leg-row-auto" : "leg-row";
+        return `<div class="${rowCls}">
+            <div>
+                ${isAuto ? '<span class="auto-badge">AUTO</span>' : ''}
+                <select onchange="changeInstrument(${i},this.value)">${ALL_INSTRUMENTS.map(inst =>
+                    `<option ${inst===leg.instrument?"selected":""}>${inst}</option>`).join("")}</select>
+            </div>
             <div><select id="ticker_${i}" onchange="updateLeg(${i},'ticker',this.value)">
                 <option value="${leg.ticker}">${leg.ticker}</option></select></div>
             <div><select onchange="updateLeg(${i},'direction',this.value)">
@@ -117,6 +132,8 @@ function renderLegs() {
             <div><input type="number" value="${leg.quantity}" onchange="updateLeg(${i},'quantity',+this.value)"></div>
             <div><input type="number" value="${leg.taxa}" step="0.005" onchange="updateLeg(${i},'taxa',+this.value)"></div>
             <div>${isNTNB ? `<input type="number" value="${vnaVal}" step="0.01" placeholder="VNA" onchange="updateLeg(${i},'vna',+this.value||null)">` : `<span class="muted" style="font-size:10px">—</span>`}</div>
+            <div>${isCoupon && !isAuto ? `<select onchange="changeHedgeMode(${i},this.value)">${HEDGE_MODES.map(h =>
+                `<option value="${h.v}" ${h.v===hedgeMode?"selected":""}>${h.l}</option>`).join("")}</select>` : `<span class="muted" style="font-size:10px">—</span>`}</div>
             <div><select onchange="updateLeg(${i},'corr_type',this.value)">${CORR_TYPES.map(ct =>
                 `<option ${ct===leg.corr_type?"selected":""}>${ct}</option>`).join("")}</select></div>
             <div><input type="number" value="${leg.corr_value}" step="0.001" onchange="updateLeg(${i},'corr_value',+this.value)"></div>
@@ -125,6 +142,13 @@ function renderLegs() {
     }).join("");
 
     state.legs.forEach((leg, i) => populateTickerSelect(i, leg.instrument, leg.ticker));
+}
+
+function changeHedgeMode(i, mode) {
+    state.legs[i].hedge_mode = mode;
+    state.legs = state.legs.filter(l => !l.auto);
+    renderLegs();
+    processLegs();
 }
 
 async function populateTickerSelect(i, instrument, currentTicker) {
@@ -146,6 +170,7 @@ async function populateTickerSelect(i, instrument, currentTicker) {
 
 async function changeInstrument(i, inst) {
     state.legs[i].instrument = inst;
+    if (inst === "NTN-B" && !state.legs[i].vna) state.legs[i].vna = 4500.0;
     const tickers = await fetchTickers(inst);
     if (tickers.length) state.legs[i].ticker = tickers[0];
     renderLegs();
@@ -153,7 +178,18 @@ async function changeInstrument(i, inst) {
 }
 
 function updateLeg(i, field, val) {
-    state.legs[i][field] = val;
+    const leg = state.legs[i];
+    leg[field] = val;
+    if (leg.auto && ["quantity","taxa","ticker","direction"].includes(field)) {
+        leg.auto = false;
+        for (let j = i - 1; j >= 0; j--) {
+            const inst = state.legs[j].instrument;
+            if ((inst === "NTN-F" || inst === "NTN-B") && !state.legs[j].auto) {
+                state.legs[j].hedge_mode = "manual";
+                break;
+            }
+        }
+    }
     processLegs();
 }
 
@@ -220,13 +256,31 @@ function findMarketRate(inst, ticker, m) {
 
 async function processLegs() {
     const body = {
-        legs: state.legs,
+        legs: state.legs.filter(l => !l.auto),
         data_neg: document.getElementById("dataNeg").value,
         spot: +document.getElementById("spotInput").value,
+        di1: state.marketData?.di1 || [],
+        dap: state.marketData?.dap || [],
     };
     try {
         const resp = await fetch("/sim/process", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
         state.results = await resp.json();
+        if (state.results && state.results.legs) {
+            state.legs = state.results.legs.map(l => ({
+                instrument: l.instrument,
+                ticker: l.ticker,
+                direction: l.direction,
+                quantity: l.quantity,
+                taxa: l.taxa,
+                corr_type: l.corr_type || "Nenhuma",
+                corr_value: l.corr_value || 0.0,
+                vna: l.vna || null,
+                hedge_mode: l.hedge_mode || "manual",
+                auto: l.auto || false,
+                auto_for: l.auto_for,
+            }));
+            renderLegs();
+        }
         renderResults();
         renderScenarios();
     } catch(e) { console.error(e); }
@@ -514,10 +568,13 @@ function sliderHtml(label, key, val, min, max, step, hint) {
 async function loadCharts() {
     if (!state.results) return;
     const r = state.results;
+    const di1 = state.marketData?.di1 || [];
+    const dap = state.marketData?.dap || [];
     const base = {legs: r.legs, scenario_key: state.scenarioKey, magnitude: state.magnitude,
         delta_fx_pct: state.deltaFx, delta_ipca_bps: state.deltaIpca, delta_cupom_bps: state.deltaCupom,
         custom_parallel_bps: state.customParallel, custom_slope_bps: state.customSlope,
-        custom_curvature_bps: state.customCurvature};
+        custom_curvature_bps: state.customCurvature,
+        di1: di1, dap: dap};
 
     const plotCfg = {displayModeBar:false, responsive:true};
 
@@ -535,10 +592,10 @@ async function loadCharts() {
     }
 
     const [curve, pnl, cons, perLeg, mtm] = await Promise.all([
-        safeChart("/sim/charts/curve", {...base, di1:state.marketData?.di1||[], dap:state.marketData?.dap||[]}, "chartContainer"),
+        safeChart("/sim/charts/curve", base, "chartContainer"),
         safeChart("/sim/charts/pnl-bars", base, "pnlBarsChart"),
         safeChart("/sim/charts/pnl-consolidated", base, "pnlConsolidatedChart"),
-        safeChart("/sim/charts/pnl-per-leg", base, "pnlPerLegChart"),
+        safeChart("/sim/charts/pnl-per-leg", {...base, expand_flows: !!state.expandFlows}, "pnlPerLegChart"),
         safeChart("/sim/mtm-table", base, null),
     ]);
 
@@ -552,7 +609,21 @@ async function loadCharts() {
     if (mtm && mtm.table) renderMtmTable(mtm.table, r.legs);
     if (mtm && mtm.flow_pnl) renderCashflows(r, mtm.flow_pnl);
 
+    renderPnlPerLegToggle();
     renderChartTabs();
+}
+
+function renderPnlPerLegToggle() {
+    const r = state.results;
+    if (!r) return;
+    const hasCoupon = r.legs.some(l => ["NTN-F","NTN-B"].includes(l.instrument) && !l.auto);
+    const el = document.getElementById("pnlPerLegToggle");
+    if (!el) return;
+    if (!hasCoupon) { el.innerHTML = ""; return; }
+    el.innerHTML = `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#8b949e;cursor:pointer">
+        <input type="checkbox" ${state.expandFlows?"checked":""} onchange="state.expandFlows=this.checked;loadCharts()" style="cursor:pointer">
+        Detalhar P&L por fluxo (cupons + principal) na NTN-F/NTN-B
+    </label>`;
 }
 
 function renderChartTabs() {

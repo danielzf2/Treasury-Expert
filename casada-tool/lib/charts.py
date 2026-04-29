@@ -2,13 +2,35 @@
 
 from __future__ import annotations
 import plotly.graph_objects as go
-from .instruments import INSTRUMENTS
-from .scenarios import calc_scenario_delta, calc_leg_pnl
+from .instruments import INSTRUMENTS, _coupon_cashflows
+from .scenarios import (
+    calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow, get_spot_curve_for_leg,
+)
 from .curves import (
     flat_forward_curve, flat_forward_curve_lin360,
     build_di_vertices, build_dap_vertices, build_frc_vertices,
-    build_forward_curve, flat_forward_lin360,
+    build_forward_curve, flat_forward_lin360, flat_forward_interp,
 )
+
+
+def _smart_leg_pnl(leg: dict, leg_delta: float, scenario_key: str, magnitude: float,
+                   du_min: int, du_max: int,
+                   spot_curve: list,
+                   delta_fx_pct: float, delta_ipca_bps: float, delta_cupom_bps: float,
+                   custom_p: float, custom_s: float, custom_c: float) -> float:
+    """Use per-flow MtM if leg is coupon bond and curve is available; else use TIR-shift."""
+    info = leg.get("info") or INSTRUMENTS.get(leg.get("instrument"))
+    if info and info.cup_sem > 0 and spot_curve:
+        result = calc_leg_pnl_per_flow(
+            leg, scenario_key, magnitude, du_min, du_max, spot_curve,
+            custom_p, custom_s, custom_c, delta_ipca_bps,
+        )
+        if result is not None:
+            return result["leg_pnl"]
+    return calc_leg_pnl(leg, leg_delta,
+                        delta_fx_pct=delta_fx_pct,
+                        delta_ipca_bps=delta_ipca_bps,
+                        delta_cupom_bps=delta_cupom_bps)
 
 COLORS = ["#58a6ff", "#f85149", "#3fb950", "#d29922", "#bc8cff", "#f778ba"]
 
@@ -215,30 +237,72 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
         _positions = ["top center", "bottom center", "top right", "bottom right",
                       "top left", "bottom left"]
         for i, l in enumerate(rate_legs):
+            info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
+            is_coupon = info and info.cup_sem > 0
             delta = calc_scenario_delta(
                 l["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
                 custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
             )
             after = l["tax_fin"] + delta / 100
-            lbl = f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
+            prefix = "AUTO " if l.get("auto") else ""
+            lbl = f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
             pos = _positions[i % len(_positions)]
             color = COLORS[i % len(COLORS)]
 
             fig.add_trace(go.Scatter(
                 x=[l["du"]], y=[l["tax_fin"]], mode="markers",
                 name=lbl,
-                marker=dict(size=8, color=color, symbol="circle-open", line=dict(width=2, color=color)),
+                marker=dict(size=10, color=color, symbol="circle-open", line=dict(width=2, color=color)),
                 hovertemplate=f"{lbl}<br>DU: %{{x}}<br>Taxa: %{{y:.3f}}%<extra>Antes</extra>",
                 legendgroup=lbl, showlegend=True,
             ))
             fig.add_trace(go.Scatter(
                 x=[l["du"]], y=[after], mode="markers+text",
-                marker=dict(size=10, color=color, symbol="circle"),
+                marker=dict(size=12, color=color, symbol="circle"),
                 text=[f"{lbl} {delta:+.0f}bp"],
                 textposition=pos, textfont=dict(size=10, color=color),
                 hovertemplate=f"{lbl}<br>DU: %{{x}}<br>Taxa: %{{y:.3f}}%<br>Delta: {delta:+.1f}bp<extra>Depois</extra>",
                 legendgroup=lbl, showlegend=False,
             ))
+
+            if is_coupon and not l.get("auto"):
+                cf_dict = l.get("cashflows", {})
+                cashflows = cf_dict.get("flows") if isinstance(cf_dict, dict) else None
+                if cashflows:
+                    cf_dus = []
+                    cf_rates_before = []
+                    cf_rates_after = []
+                    cf_labels = []
+                    cf_deltas = []
+                    for cf in cashflows:
+                        if cf["label"].startswith("Principal"):
+                            continue
+                        d_k = calc_scenario_delta(
+                            cf["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                            custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                        )
+                        cf_dus.append(cf["du"])
+                        cf_rates_before.append(l["tax_fin"])
+                        cf_rates_after.append(l["tax_fin"] + d_k / 100)
+                        cf_labels.append(cf["label"])
+                        cf_deltas.append(d_k)
+                    if cf_dus:
+                        fig.add_trace(go.Scatter(
+                            x=cf_dus, y=cf_rates_before, mode="markers",
+                            marker=dict(size=5, color=color, symbol="diamond-open"),
+                            customdata=cf_labels,
+                            hovertemplate=f"{lbl} %{{customdata}}<br>DU: %{{x}}<br>Taxa: %{{y:.3f}}%<extra>Antes</extra>",
+                            legendgroup=lbl, showlegend=False,
+                            opacity=0.6,
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=cf_dus, y=cf_rates_after, mode="markers",
+                            marker=dict(size=6, color=color, symbol="diamond"),
+                            customdata=list(zip(cf_labels, cf_deltas)),
+                            hovertemplate=f"{lbl} %{{customdata[0]}}<br>DU: %{{x}}<br>Taxa: %{{y:.3f}}%<br>Delta: %{{customdata[1]:+.1f}}bp<extra>Depois</extra>",
+                            legendgroup=lbl, showlegend=False,
+                            opacity=0.85,
+                        ))
 
     fig.update_layout(
         **_base_layout("Curva de Juros — Flat Forward", 450),
@@ -255,7 +319,9 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
                       delta_cupom_bps: float = 0.0,
                       custom_parallel_bps: float = 0.0,
                       custom_slope_bps: float = 0.0,
-                      custom_curvature_bps: float = 0.0) -> go.Figure:
+                      custom_curvature_bps: float = 0.0,
+                      di1_curve: list = None,
+                      dap_curve: list = None) -> go.Figure:
     du_min, du_max = _rate_du_range(legs)
 
     names, pnls, colors = [], [], []
@@ -264,11 +330,14 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
             l, du_min, du_max, scenario_key, magnitude,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         )
-        pnl = calc_leg_pnl(l, delta,
-                           delta_fx_pct=delta_fx_pct,
-                           delta_ipca_bps=delta_ipca_bps,
-                           delta_cupom_bps=delta_cupom_bps)
-        names.append(f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}")
+        spot = get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq"))
+        pnl = _smart_leg_pnl(
+            l, delta, scenario_key, magnitude, du_min, du_max, spot,
+            delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
+            custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+        )
+        prefix = "AUTO " if l.get("auto") else ""
+        names.append(f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}")
         pnls.append(pnl)
         colors.append(_GREEN if pnl >= 0 else _RED)
 
@@ -302,21 +371,25 @@ def chart_pnl_consolidado(legs: list[dict],
                            delta_cupom_bps: float = 0.0,
                            custom_parallel_bps: float = 0.0,
                            custom_slope_bps: float = 0.0,
-                           custom_curvature_bps: float = 0.0) -> go.Figure:
+                           custom_curvature_bps: float = 0.0,
+                           di1_curve: list = None,
+                           dap_curve: list = None) -> go.Figure:
     deltas_range = list(range(-20, 21))
     du_min, du_max = _rate_du_range(legs)
+    spot_per_leg = [get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq")) for l in legs]
     total_pnl = []
     for d in deltas_range:
         t = 0.0
-        for l in legs:
+        for li, l in enumerate(legs):
             leg_d = _leg_delta(
                 l, du_min, du_max, scenario_key, d,
                 custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
             )
-            t += calc_leg_pnl(l, leg_d,
-                              delta_fx_pct=delta_fx_pct,
-                              delta_ipca_bps=delta_ipca_bps,
-                              delta_cupom_bps=delta_cupom_bps)
+            t += _smart_leg_pnl(
+                l, leg_d, scenario_key, d, du_min, du_max, spot_per_leg[li],
+                delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
+                custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+            )
         total_pnl.append(t)
 
     colors = [_GREEN if v >= 0 else _RED for v in total_pnl]
@@ -341,35 +414,72 @@ def chart_pnl_por_perna(legs: list[dict],
                          delta_cupom_bps: float = 0.0,
                          custom_parallel_bps: float = 0.0,
                          custom_slope_bps: float = 0.0,
-                         custom_curvature_bps: float = 0.0) -> go.Figure:
+                         custom_curvature_bps: float = 0.0,
+                         di1_curve: list = None,
+                         dap_curve: list = None,
+                         expand_flows: bool = False) -> go.Figure:
     deltas_range = list(range(-20, 21))
     du_min, du_max = _rate_du_range(legs)
     fig = go.Figure()
+    color_idx = 0
     for i, l in enumerate(legs):
-        name = f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
-        if _is_rate_leg(l):
+        info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
+        prefix = "AUTO " if l.get("auto") else ""
+        name = f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
+        spot = get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq"))
+        is_coupon = info and info.cup_sem > 0
+        base_color = COLORS[color_idx % len(COLORS)]
+        color_idx += 1
+
+        if expand_flows and is_coupon and spot:
+            cashflows = l.get("cashflows", {}).get("flows") or []
+            n_flows = len(cashflows)
+            for k_idx, cf in enumerate(cashflows):
+                pnls = []
+                for d in deltas_range:
+                    res = calc_leg_pnl_per_flow(
+                        l, scenario_key, d, du_min, du_max, spot,
+                        custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                        delta_ipca_bps,
+                    )
+                    if res:
+                        pnls.append(res["flows"][k_idx]["pnl_flow"])
+                    else:
+                        pnls.append(0)
+                width = 2 if cf["label"].startswith("Principal") else 1
+                opacity = 1.0 if cf["label"].startswith("Principal") else 0.55
+                fig.add_trace(go.Scatter(
+                    x=deltas_range, y=pnls, mode="lines",
+                    name=f"{name} - {cf['label']}",
+                    line=dict(color=base_color, width=width),
+                    opacity=opacity,
+                ))
+        elif _is_rate_leg(l):
             pnls = []
             for d in deltas_range:
                 leg_d = _leg_delta(
                     l, du_min, du_max, scenario_key, d,
                     custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                 )
-                pnls.append(calc_leg_pnl(
-                    l, leg_d,
-                    delta_fx_pct=delta_fx_pct,
-                    delta_ipca_bps=delta_ipca_bps,
-                    delta_cupom_bps=delta_cupom_bps,
+                pnls.append(_smart_leg_pnl(
+                    l, leg_d, scenario_key, d, du_min, du_max, spot,
+                    delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                 ))
+            fig.add_trace(go.Scatter(
+                x=deltas_range, y=pnls, mode="lines", name=name,
+                line=dict(color=base_color, width=2),
+            ))
         else:
             pnls = [calc_leg_pnl(l, 0,
                                  delta_fx_pct=delta_fx_pct,
                                  delta_ipca_bps=delta_ipca_bps,
                                  delta_cupom_bps=delta_cupom_bps)
                     for _ in deltas_range]
-        fig.add_trace(go.Scatter(
-            x=deltas_range, y=pnls, mode="lines", name=name,
-            line=dict(color=COLORS[i % len(COLORS)], width=2),
-        ))
+            fig.add_trace(go.Scatter(
+                x=deltas_range, y=pnls, mode="lines", name=name,
+                line=dict(color=base_color, width=2),
+            ))
     fig.update_layout(
         **_base_layout("P&L por Perna — Cenário Selecionado", 350),
         xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),

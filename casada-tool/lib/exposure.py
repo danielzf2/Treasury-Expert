@@ -163,6 +163,56 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     is_casada = strategy["type"] == "casada"
     is_dol_sint = strategy["type"] in ("dol_sint", "dol_sint_ddi")
 
+    coupon_tpf_with_hedge = next(
+        (l for l in legs
+         if INSTRUMENTS[l["instrument"]].cup_sem > 0
+         and l.get("hedge_mode", "manual") in ("maturity", "duration", "strip")
+         and not l.get("auto")),
+        None,
+    )
+    if coupon_tpf_with_hedge:
+        mode = coupon_tpf_with_hedge.get("hedge_mode")
+        tpf_name = coupon_tpf_with_hedge["instrument"]
+        if mode == "strip":
+            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
+                            "desc": f"Strip hedge: 1 DI por fluxo, casa key-rates de {tpf_name}"})
+            factors.append({"fator": "Inclinacao (steepening)", "exposto": False,
+                            "desc": "Strip hedgeia inclinacao (cada fluxo tem seu DI)"})
+            factors.append({"fator": "Curvatura (butterfly)", "exposto": False,
+                            "desc": "Strip elimina key-rate risk em qualquer cenario de curva"})
+            factors.append({"fator": "Convexidade (gamma)", "exposto": False,
+                            "desc": "Convexidade casada por fluxo"})
+            if has_ntnb:
+                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
+                                "desc": "Strip com DAP hedgeia tambem o cupom IPCA"})
+            return factors
+        elif mode == "duration":
+            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
+                            "desc": f"Duration hedge: DV01 casado no prazo medio de {tpf_name}"})
+            factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
+                            "desc": f"Duration hedge cobre apenas 1 vertice; cupons em outros vertices"})
+            factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
+                            "desc": "Duration hedge nao cobre key-rate risk"})
+            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
+                            "desc": f"DI zero-coupon vs {tpf_name} com cupons"})
+            if has_ntnb:
+                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
+                                "desc": "Duration com DAP hedgeia inflacao (residual: spread IPCA)"})
+            return factors
+        elif mode == "maturity":
+            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
+                            "desc": f"Vencimento hedge: DI no DU final de {tpf_name} (DV01 mismatch leve)"})
+            factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
+                            "desc": "Hedge no vencimento descasa duration; cupons expostos a curto"})
+            factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
+                            "desc": "Hedge no vencimento nao cobre fluxos intermediarios"})
+            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
+                            "desc": f"D.Mac de {tpf_name} < D.Mac do DI no vencimento"})
+            if has_ntnb:
+                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
+                                "desc": "DAP no vencimento hedgeia inflacao com mismatch"})
+            return factors
+
     if len(legs) == 1:
         info = INSTRUMENTS[legs[0]["instrument"]]
         if info.conv == "price":

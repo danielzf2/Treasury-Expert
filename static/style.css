@@ -127,10 +127,28 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
 
 .leg-row {
     display: grid;
-    grid-template-columns: 1.2fr 0.7fr 0.6fr 0.8fr 1fr 1fr 0.7fr 0.6fr auto;
+    grid-template-columns: 1.2fr 0.7fr 0.6fr 0.8fr 0.9fr 0.9fr 1fr 0.7fr 0.6fr auto;
     gap: 8px;
     align-items: end;
     margin-bottom: 8px;
+}
+.leg-row-auto > div select,
+.leg-row-auto > div input {
+    background: #0d1117 !important;
+    border-color: #21262d !important;
+    color: #8b949e !important;
+}
+.auto-badge {
+    display: inline-block;
+    background: rgba(210, 153, 34, 0.18);
+    color: #d29922;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-right: 4px;
+    vertical-align: middle;
 }
 .leg-row label {
     display: block;
