@@ -190,20 +190,34 @@ function changeHedgeMode(i, mode) {
     processLegs();
 }
 
+const _MONTH_NAMES = ["", "Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const _TPF_INSTRUMENTS = new Set(["LTN", "NTN-F", "NTN-B", "LFT"]);
+const _TICKER_TO_MONTH_LOCAL = {F:1,G:2,H:3,J:4,K:5,M:6,N:7,Q:8,U:9,V:10,X:11,Z:12};
+
+function tickerLabel(ticker, instrument) {
+    /* Para TPF mostra 'Set/26' (mes/ano), para derivativos mantem 'F32'. */
+    if (!_TPF_INSTRUMENTS.has(instrument)) return ticker;
+    const m = ticker.toUpperCase().match(/^([FGHJKMNQUVXZ])(\d{2})$/);
+    if (!m) return ticker;
+    const month = _TICKER_TO_MONTH_LOCAL[m[1]];
+    return `${_MONTH_NAMES[month]}/${m[2]}`;
+}
+
 async function populateTickerSelect(i, instrument, currentTicker) {
     const sel = document.getElementById(`ticker_${i}`);
     if (!sel) return;
     const tickers = await fetchTickers(instrument);
     if (!tickers.length) {
-        sel.innerHTML = `<option value="${currentTicker}">${currentTicker}</option>`;
+        sel.innerHTML = `<option value="${currentTicker}">${tickerLabel(currentTicker, instrument)}</option>`;
         return;
     }
     const found = tickers.includes(currentTicker);
     sel.innerHTML = tickers.map(t =>
-        `<option value="${t}" ${t === currentTicker ? "selected" : ""}>${t}</option>`
+        `<option value="${t}" ${t === currentTicker ? "selected" : ""}>${tickerLabel(t, instrument)}</option>`
     ).join("");
     if (!found && currentTicker) {
-        sel.insertAdjacentHTML("afterbegin", `<option value="${currentTicker}" selected>${currentTicker}</option>`);
+        sel.insertAdjacentHTML("afterbegin",
+            `<option value="${currentTicker}" selected>${tickerLabel(currentTicker, instrument)}</option>`);
     }
 }
 
@@ -362,25 +376,20 @@ function findMarketRate(inst, ticker, m) {
     return null;
 }
 
-const _TICKER_TO_MONTH = {F:1,G:2,H:3,J:4,K:5,M:6,N:7,Q:8,U:9,V:10,X:11,Z:12};
-
 function tickerToDateStr(ticker) {
-    // 'F32' -> '2032-01-01' (LTN/NTN-F/LFT) ou '2032-01-15' (NTN-B)
-    // Aproximacao: usamos dia 1 - matching exato exige instrumento, mas
-    // o ANBIMA TPF feed ja tras a data exata; aqui so precisamos do mes/ano.
+    // 'F32' -> '2032-01-01' (LTN/NTN-F/LFT)
     const m = ticker.toUpperCase().match(/^([FGHJKMNQUVXZ])(\d{2})$/);
     if (!m) return null;
-    const month = _TICKER_TO_MONTH[m[1]];
+    const month = _TICKER_TO_MONTH_LOCAL[m[1]];
     const yr = 2000 + parseInt(m[2]);
-    // Tenta dia 1 primeiro (LTN/NTN-F/LFT); se nao bater, callsite tenta dia 15
     return `${yr}-${String(month).padStart(2,"0")}-01`;
 }
 
 function tickerToDateNTNB(ticker) {
-    // Variante para NTN-B (sempre dia 15)
+    // 'K29' -> '2029-05-15' (NTN-B sempre dia 15)
     const m = ticker.toUpperCase().match(/^([FGHJKMNQUVXZ])(\d{2})$/);
     if (!m) return null;
-    const month = _TICKER_TO_MONTH[m[1]];
+    const month = _TICKER_TO_MONTH_LOCAL[m[1]];
     const yr = 2000 + parseInt(m[2]);
     return `${yr}-${String(month).padStart(2,"0")}-15`;
 }
