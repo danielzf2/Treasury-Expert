@@ -132,9 +132,19 @@ const HEDGE_MODES = [
 
 function renderLegs() {
     const hdr = document.getElementById("legsHeader");
-    hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","VNA","Hedge","Corretagem","Valor",""].map(
-        h => `<div style="color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.3px">${h}</div>`
-    ).join("");
+    const headerCols = [
+        {label: "Instrumento", cls: ""},
+        {label: "Ticker",      cls: ""},
+        {label: "C/V",         cls: "col-ctr"},
+        {label: "Qtd",         cls: "col-num"},
+        {label: "Taxa (%)",    cls: "col-num"},
+        {label: "VNA",         cls: "col-num"},
+        {label: "Hedge",       cls: ""},
+        {label: "Corretagem",  cls: ""},
+        {label: "Valor",       cls: "col-num"},
+        {label: "",            cls: "col-ctr"},
+    ];
+    hdr.innerHTML = headerCols.map(c => `<div class="${c.cls}">${c.label}</div>`).join("");
 
     const c = document.getElementById("legsContainer");
     c.innerHTML = state.legs.map((leg, i) => {
@@ -403,22 +413,41 @@ function renderRiskFactors(r) {
 
 function renderDetails(r) {
     const el = document.getElementById("detailsTable");
-    const cols = ["Instr.","Dir.","Lado","Vcto","Liq","DU","DC","Taxa","Final","PU","Financeiro","D.Mac","D.Mod","DV01/un","DV01 Tot","Corr R$","Corr bps"];
-    let html = '<table class="sim-tbl"><tr>' + cols.map(c=>`<th>${c}</th>`).join("") + "</tr>";
+    const cols = [
+        {label: "Instr.",    cls: ""},
+        {label: "Dir.",      cls: ""},
+        {label: "Lado",      cls: ""},
+        {label: "Vcto",      cls: ""},
+        {label: "Liq",       cls: ""},
+        {label: "DU",        cls: "tc"},
+        {label: "DC",        cls: "tc"},
+        {label: "Taxa",      cls: "tr"},
+        {label: "Final",     cls: "tr"},
+        {label: "PU",        cls: "tr"},
+        {label: "Financeiro",cls: "tr"},
+        {label: "D.Mac",     cls: "tr"},
+        {label: "D.Mod",     cls: "tr"},
+        {label: "DV01/un",   cls: "tr"},
+        {label: "DV01 Tot",  cls: "tr"},
+        {label: "Corr R$",   cls: "tr"},
+        {label: "Corr bps",  cls: "tr"},
+    ];
+    let html = '<table class="sim-tbl"><tr>' + cols.map(c=>`<th class="${c.cls}">${c.label}</th>`).join("") + "</tr>";
     r.legs.forEach(l => {
         const isP = l.info_conv === "price";
         const rowCls = l.auto ? ' style="opacity:0.65"' : '';
         const autoMark = l.auto ? '<span class="auto-badge" style="margin-right:4px">A</span>' : '';
         html += `<tr${rowCls}>
             <td>${autoMark}${l.instrument}</td><td>${l.direction==="C"?"Compra":"Venda"}</td><td>${l.side}</td>
-            <td>${l.parsed_full}</td><td>${l.liq}</td><td>${l.du}</td><td>${l.dc}</td>
-            <td class="mono">${isP?l.taxa.toFixed(1):l.taxa.toFixed(4)+"%"}</td>
-            <td class="mono">${isP?l.tax_fin.toFixed(1):l.tax_fin.toFixed(4)+"%"}</td>
-            <td class="mono">${isP?l.pu.toFixed(1):l.pu.toFixed(2)}</td>
-            <td class="mono tr">${isP?"--":"R$ "+l.fin.toLocaleString("pt-BR",{maximumFractionDigits:0})}</td>
-            <td class="mono">${l.d_mac.toFixed(2)}</td><td class="mono">${l.d_mod.toFixed(2)}</td>
-            <td class="mono">${l.dv01_unit.toFixed(2)}</td><td class="mono">${l.dv01_total.toFixed(0)}</td>
-            <td class="mono">${l.corr_brl.toFixed(2)}</td><td class="mono">${l.corr_bps.toFixed(2)}</td></tr>`;
+            <td>${l.parsed_full}</td><td class="mono">${l.liq}</td>
+            <td class="tc mono">${l.du}</td><td class="tc mono">${l.dc}</td>
+            <td class="tr mono">${isP?l.taxa.toFixed(1):l.taxa.toFixed(4)+"%"}</td>
+            <td class="tr mono">${isP?l.tax_fin.toFixed(1):l.tax_fin.toFixed(4)+"%"}</td>
+            <td class="tr mono">${isP?l.pu.toFixed(1):l.pu.toFixed(2)}</td>
+            <td class="tr mono">${isP?"--":"R$ "+l.fin.toLocaleString("pt-BR",{maximumFractionDigits:0})}</td>
+            <td class="tr mono">${l.d_mac.toFixed(2)}</td><td class="tr mono">${l.d_mod.toFixed(2)}</td>
+            <td class="tr mono">${l.dv01_unit.toFixed(2)}</td><td class="tr mono">${l.dv01_total.toFixed(0)}</td>
+            <td class="tr mono">${l.corr_brl.toFixed(2)}</td><td class="tr mono">${l.corr_bps.toFixed(2)}</td></tr>`;
     });
     html += "</table>";
     el.innerHTML = html;
@@ -776,15 +805,18 @@ function renderMarketDataTab() {
 
 function renderMktTable(title, data, cols) {
     if (!data || !data.length) return `<div><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><p class="muted">Sem dados</p></div>`;
+    const numericCols = new Set(["last","bid","ask","ajuste"]);
+    const colCls = c => numericCols.has(c) ? "tr" : (c === "vcto" ? "tc" : "");
     let html = `<div><h3 style="font-size:14px;margin-bottom:8px">${title}</h3><div style="overflow-x:auto;max-height:400px"><table class="sim-tbl"><tr>`;
-    cols.forEach(c => html += `<th>${c}</th>`);
+    cols.forEach(c => html += `<th class="${colCls(c)}">${c}</th>`);
     html += "</tr>";
     data.forEach(row => {
         html += "<tr>";
         cols.forEach(c => {
             let v = row[c];
             if (typeof v === "number") v = v === 0 ? "—" : (Number.isInteger(v) ? v.toLocaleString("pt-BR") : v);
-            html += `<td class="mono">${v}</td>`;
+            const cls = `mono ${colCls(c)}`.trim();
+            html += `<td class="${cls}">${v}</td>`;
         });
         html += "</tr>";
     });

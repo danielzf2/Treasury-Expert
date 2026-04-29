@@ -56,8 +56,10 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     color: #e6edf3;
     padding: 6px 10px;
     font-size: 13px;
+    font-variant-numeric: tabular-nums;
     transition: border-color 0.15s;
 }
+.config-row input[type="number"] { text-align: right; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; }
 .config-row input:focus {
     outline: none;
     border-color: #58a6ff;
@@ -159,8 +161,17 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     display: grid;
     grid-template-columns: 1.2fr 0.7fr 0.6fr 0.8fr 0.9fr 0.9fr 1fr 0.7fr 0.6fr auto;
     gap: 8px;
-    align-items: end;
+    align-items: center;
     margin-bottom: 8px;
+}
+.leg-row > div { min-height: 32px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.leg-row > div > select,
+.leg-row > div > input { flex: 1 1 100%; }
+.leg-row > div > .muted {
+    flex: 1 1 100%;
+    text-align: center;
+    font-size: 11px;
+    color: #6e7681;
 }
 .leg-row-auto > div select,
 .leg-row-auto > div input {
@@ -198,7 +209,15 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     padding: 7px 8px;
     font-size: 13px;
     font-family: inherit;
+    height: 32px;
+    line-height: 1;
     transition: border-color 0.15s;
+}
+.leg-row input[type="number"] {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px;
 }
 .leg-row select:focus,
 .leg-row input:focus {
@@ -214,6 +233,21 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     padding-right: 24px;
     cursor: pointer;
 }
+
+/* Header da tabela de pernas — alinhamento por tipo de coluna */
+.leg-row.is-header > div {
+    color: #8b949e;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 0 8px;
+    line-height: 1.4;
+    min-height: auto;
+    justify-content: flex-start;
+}
+.leg-row.is-header > div.col-num { justify-content: flex-end; padding-right: 10px; }
+.leg-row.is-header > div.col-ctr { justify-content: center; }
 .leg-row .btn-remove {
     background: none;
     border: 1px solid #30363d;
@@ -300,6 +334,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Simulation card / table wrapper */
@@ -324,6 +359,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
+    font-variant-numeric: tabular-nums;
 }
 .sim-tbl th {
     background: #1c2128;
@@ -336,6 +372,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     border-bottom: 1px solid #30363d;
     text-align: left;
     white-space: nowrap;
+    vertical-align: middle;
     position: sticky;
     top: 0;
 }
@@ -344,9 +381,14 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     border-bottom: 1px solid #21262d;
     color: #e6edf3;
     white-space: nowrap;
+    vertical-align: middle;
 }
 .sim-tbl tr:last-child td { border-bottom: none; }
 .sim-tbl tr:hover td { background: rgba(88, 166, 255, 0.02); }
+
+/* Garantir que classes de alinhamento vencam o text-align padrao do th */
+.sim-tbl th.tr, .sim-tbl td.tr { text-align: right; }
+.sim-tbl th.tc, .sim-tbl td.tc { text-align: center; }
 
 /* Ativo vs Passivo highlight table */
 .av-wrap {
@@ -383,7 +425,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
 .av-result td.tc { text-align: center !important; }
 
 /* Utility classes */
-.mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; }
+.mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 .tc { text-align: center; }
 .tr { text-align: right; }
 .bold { font-weight: 600; }
@@ -583,6 +625,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     font-size: 28px;
     font-weight: 700;
     font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-variant-numeric: tabular-nums;
     letter-spacing: -0.5px;
 }
 
