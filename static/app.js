@@ -27,6 +27,7 @@ const state = {
     results: null,
     scenarioKey: "bull_par",
     magnitude: 10,
+    customParallel: 0, customSlope: 0, customCurvature: 0,
     deltaFx: 0, deltaIpca: 0, deltaCupom: 0,
     activeTab: "sim",
     activeChartTab: "curve",
@@ -291,6 +292,7 @@ function renderScenarioRadio() {
 
 function changeScenario(key) {
     state.scenarioKey = key;
+    renderSliders();
     loadCharts();
 }
 
@@ -302,7 +304,13 @@ function renderSliders() {
 
     const el = document.getElementById("slidersPanel");
     let html = '<p style="font-size:12px;color:#8b949e;margin-bottom:4px">Choques</p>';
-    html += sliderHtml("Pre (bps)", "magnitude", state.magnitude, -50, 50, 1);
+    if (state.scenarioKey === "custom") {
+        html += sliderHtml("Paralelo (bps)", "customParallel", state.customParallel, -50, 50, 1);
+        html += sliderHtml("Inclinação (bps)", "customSlope", state.customSlope, -50, 50, 1);
+        html += sliderHtml("Curvatura (bps)", "customCurvature", state.customCurvature, -50, 50, 1);
+    } else {
+        html += sliderHtml("Pre (bps)", "magnitude", state.magnitude, -50, 50, 1);
+    }
     if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5);
     if (hasIpca) html += sliderHtml("IPCA (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1);
     if (hasCupom) html += sliderHtml("Cup.Cambial (bps)", "deltaCupom", state.deltaCupom, -50, 50, 1);
@@ -319,7 +327,9 @@ async function loadCharts() {
     if (!state.results) return;
     const r = state.results;
     const base = {legs: r.legs, scenario_key: state.scenarioKey, magnitude: state.magnitude,
-        delta_fx_pct: state.deltaFx, delta_ipca_bps: state.deltaIpca, delta_cupom_bps: state.deltaCupom};
+        delta_fx_pct: state.deltaFx, delta_ipca_bps: state.deltaIpca, delta_cupom_bps: state.deltaCupom,
+        custom_parallel_bps: state.customParallel, custom_slope_bps: state.customSlope,
+        custom_curvature_bps: state.customCurvature};
 
     const plotCfg = {displayModeBar:false, responsive:true};
 
@@ -373,7 +383,9 @@ async function switchChartTab(tab) {
     renderChartTabs();
     const r = state.results;
     const base = {legs:r.legs, scenario_key:state.scenarioKey, magnitude:state.magnitude,
-        delta_fx_pct:state.deltaFx, delta_ipca_bps:state.deltaIpca, delta_cupom_bps:state.deltaCupom};
+        delta_fx_pct:state.deltaFx, delta_ipca_bps:state.deltaIpca, delta_cupom_bps:state.deltaCupom,
+        custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
+        custom_curvature_bps:state.customCurvature};
     let url, body;
     if (tab === "curve") { url="/sim/charts/curve"; body={...base, di1:state.marketData?.di1||[], dap:state.marketData?.dap||[]}; }
     else if (tab === "cupom") { url="/sim/charts/cupom"; body={frc_contracts:state.marketData?.frc||[], delta_cupom_bps:state.deltaCupom, legs:r.legs}; }

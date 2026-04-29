@@ -54,10 +54,16 @@ def _rate_du_range(legs: list[dict]) -> tuple[int, int]:
 
 
 def _leg_delta(l: dict, du_min: int, du_max: int,
-               scenario_key: str, magnitude: float) -> float:
+               scenario_key: str, magnitude: float,
+               custom_parallel_bps: float = 0.0,
+               custom_slope_bps: float = 0.0,
+               custom_curvature_bps: float = 0.0) -> float:
     if not _is_rate_leg(l):
         return 0.0
-    return calc_scenario_delta(l["du"], du_min, du_max, scenario_key, magnitude)
+    return calc_scenario_delta(
+        l["du"], du_min, du_max, scenario_key, magnitude,
+        custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+    )
 
 
 def _dir_label(l: dict) -> str:
@@ -115,7 +121,10 @@ _DAP_COLOR = "#d29922"
 
 def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                               magnitude: float, di1_curve: list = None,
-                              dap_curve: list = None) -> go.Figure:
+                              dap_curve: list = None,
+                              custom_parallel_bps: float = 0.0,
+                              custom_slope_bps: float = 0.0,
+                              custom_curvature_bps: float = 0.0) -> go.Figure:
     """Curva de juros COMPLETA antes/depois do choque.
 
     Plota curva DI interpolada via flat forward (suave) e opcionalmente
@@ -144,8 +153,13 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                     hovertemplate="DU: %{x}<br>Taxa: %{y:.3f}%<extra>Antes</extra>",
                 ))
 
-                curve_deltas = [calc_scenario_delta(du, du_min_legs, du_max_legs, scenario_key, magnitude)
-                                for du in smooth_dus]
+                curve_deltas = [
+                    calc_scenario_delta(
+                        du, du_min_legs, du_max_legs, scenario_key, magnitude,
+                        custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                    )
+                    for du in smooth_dus
+                ]
                 curve_after = [r + d / 100 for r, d in zip(smooth_rates, curve_deltas)]
 
                 fig.add_trace(go.Scatter(
@@ -178,8 +192,13 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                     hovertemplate="DU: %{x}<br>Taxa real: %{y:.3f}%<extra>DAP Antes</extra>",
                 ))
 
-                dap_deltas = [calc_scenario_delta(du, du_min_legs, du_max_legs, scenario_key, magnitude)
-                              for du in dap_dus]
+                dap_deltas = [
+                    calc_scenario_delta(
+                        du, du_min_legs, du_max_legs, scenario_key, magnitude,
+                        custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                    )
+                    for du in dap_dus
+                ]
                 dap_after = [r + d / 100 for r, d in zip(dap_rates, dap_deltas)]
 
                 fig.add_trace(go.Scatter(
@@ -196,7 +215,10 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
         _positions = ["top center", "bottom center", "top right", "bottom right",
                       "top left", "bottom left"]
         for i, l in enumerate(rate_legs):
-            delta = calc_scenario_delta(l["du"], du_min_legs, du_max_legs, scenario_key, magnitude)
+            delta = calc_scenario_delta(
+                l["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+            )
             after = l["tax_fin"] + delta / 100
             lbl = f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
             pos = _positions[i % len(_positions)]
@@ -230,12 +252,18 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
                       magnitude: float,
                       delta_fx_pct: float = 0.0,
                       delta_ipca_bps: float = 0.0,
-                      delta_cupom_bps: float = 0.0) -> go.Figure:
+                      delta_cupom_bps: float = 0.0,
+                      custom_parallel_bps: float = 0.0,
+                      custom_slope_bps: float = 0.0,
+                      custom_curvature_bps: float = 0.0) -> go.Figure:
     du_min, du_max = _rate_du_range(legs)
 
     names, pnls, colors = [], [], []
     for l in legs:
-        delta = _leg_delta(l, du_min, du_max, scenario_key, magnitude)
+        delta = _leg_delta(
+            l, du_min, du_max, scenario_key, magnitude,
+            custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+        )
         pnl = calc_leg_pnl(l, delta,
                            delta_fx_pct=delta_fx_pct,
                            delta_ipca_bps=delta_ipca_bps,

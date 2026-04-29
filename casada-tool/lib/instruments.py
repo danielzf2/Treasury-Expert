@@ -3,6 +3,7 @@
 from __future__ import annotations
 import math
 from dataclasses import dataclass
+from datetime import date
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,51 @@ INSTRUMENTS: dict[str, InstrumentInfo] = {
 # PU (Preco Unitario)
 # ---------------------------------------------------------------------------
 
-def pu(instrumento: str, taxa: float, du: int, dc: int = 0) -> float:
+def _add_months(d: date, months: int) -> date:
+    month = d.month - 1 + months
+    year = d.year + month // 12
+    month = month % 12 + 1
+    return date(year, month, d.day)
+
+
+def _coupon_cashflows(instrumento: str, liq_date: date | None,
+                      venc_date: date | None, du_fallback: int) -> list[tuple[int, float]]:
+    """Retorna fluxos semestrais em DU reais, alinhados ao vencimento."""
+    info = INSTRUMENTS[instrumento]
+    face_calc = 100 if instrumento == "NTN-B" else info.face
+
+    if not liq_date or not venc_date:
+        n_sem = max(1, math.ceil(du_fallback / 126))
+        return [
+            (
+                round(du_fallback - (n_sem - j) * 126),
+                face_calc * (1 + info.cup_sem) if j == n_sem else face_calc * info.cup_sem,
+            )
+            for j in range(1, n_sem + 1)
+            if round(du_fallback - (n_sem - j) * 126) > 0
+        ]
+
+    from .calendar import du_entre
+
+    coupon_dates: list[date] = []
+    d = venc_date
+    while d > liq_date:
+        coupon_dates.append(d)
+        d = _add_months(d, -6)
+    coupon_dates.sort()
+
+    flows: list[tuple[int, float]] = []
+    for d in coupon_dates:
+        dui = du_entre(liq_date, d)
+        if dui <= 0:
+            continue
+        flow = face_calc * (1 + info.cup_sem) if d == venc_date else face_calc * info.cup_sem
+        flows.append((dui, flow))
+    return flows
+
+
+def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
+       liq_date: date | None = None, venc_date: date | None = None) -> float:
     """Calcula o PU de qualquer instrumento.
 
     Args:
@@ -67,14 +112,8 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0) -> float:
     if info.cup_sem == 0:
         return info.face / (1 + r) ** (du / 252)
 
-    n_sem = max(1, math.ceil(du / 126))
-    face_calc = 100 if instrumento == "NTN-B" else info.face
     total = 0.0
-    for j in range(1, n_sem + 1):
-        dui = round(du - (n_sem - j) * 126)
-        if dui <= 0:
-            continue
-        flow = face_calc * (1 + info.cup_sem) if j == n_sem else face_calc * info.cup_sem
+    for dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
         total += flow / (1 + r) ** (dui / 252)
     return total
 
@@ -89,7 +128,8 @@ class DurationResult:
     modificada: float # em anos
 
 
-def duration(instrumento: str, taxa: float, du: int, dc: int = 0) -> DurationResult:
+def duration(instrumento: str, taxa: float, du: int, dc: int = 0,
+             liq_date: date | None = None, venc_date: date | None = None) -> DurationResult:
     """Duration de Macaulay e Modificada.
 
     Formulas:
@@ -114,16 +154,10 @@ def duration(instrumento: str, taxa: float, du: int, dc: int = 0) -> DurationRes
         mac = du / 252
         return DurationResult(mac, mac / (1 + r))
 
-    n_sem = max(1, math.ceil(du / 126))
-    face_calc = 100 if instrumento == "NTN-B" else info.face
     sum_pv = 0.0
     sum_t_pv = 0.0
-    for j in range(1, n_sem + 1):
-        dui = round(du - (n_sem - j) * 126)
-        if dui <= 0:
-            continue
+    for dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
         t = dui / 252
-        flow = face_calc * (1 + info.cup_sem) if j == n_sem else face_calc * info.cup_sem
         pv_i = flow / (1 + r) ** t
         sum_pv += pv_i
         sum_t_pv += t * pv_i
@@ -142,7 +176,8 @@ class DV01Result:
     total: float  # R$ por bp total
 
 
-def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int) -> DV01Result:
+def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int,
+         liq_date: date | None = None, venc_date: date | None = None) -> DV01Result:
     """DV01 — variacao de valor para 1 bp na taxa.
 
     Formula:
@@ -155,12 +190,8 @@ def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int) -> DV
     if info.conv == "price":
         return DV01Result(info.mult, info.mult * quantidade)
 
-    dur = duration(instrumento, taxa, du, dc)
-    r = taxa / 100
-    if info.conv == "lin360":
-        pu_mkt = info.face / (1 + r * dc / 360)
-    else:
-        pu_mkt = info.face / (1 + r) ** (du / 252)
+    dur = duration(instrumento, taxa, du, dc, liq_date, venc_date)
+    pu_mkt = pu(instrumento, taxa, du, dc, liq_date, venc_date)
 
     unit = dur.modificada * pu_mkt * 0.0001
     return DV01Result(unit, unit * quantidade)
@@ -181,7 +212,9 @@ class KRDFlow:
     krd: float     # contribuicao para duration
 
 
-def key_rate_duration(instrumento: str, taxa: float, du: int) -> list[KRDFlow]:
+def key_rate_duration(instrumento: str, taxa: float, du: int,
+                      liq_date: date | None = None,
+                      venc_date: date | None = None) -> list[KRDFlow]:
     """Decomposicao da duration por fluxo de caixa (Key-Rate Duration).
 
     Mostra quanto cada cupom/principal contribui para a duration total.
@@ -197,20 +230,13 @@ def key_rate_duration(instrumento: str, taxa: float, du: int) -> list[KRDFlow]:
         return []
 
     r = taxa / 100
-    n_sem = max(1, math.ceil(du / 126))
-    face_calc = 100 if instrumento == "NTN-B" else info.face
-
     flows: list[KRDFlow] = []
     total_pv = 0.0
-    for j in range(1, n_sem + 1):
-        dui = round(du - (n_sem - j) * 126)
-        if dui <= 0:
-            continue
+    coupon_flows = _coupon_cashflows(instrumento, liq_date, venc_date, du)
+    for j, (dui, nominal) in enumerate(coupon_flows, start=1):
         t = dui / 252
-        is_last = j == n_sem
-        nominal = face_calc * (1 + info.cup_sem) if is_last else face_calc * info.cup_sem
         pv_i = nominal / (1 + r) ** t
-        label = "Principal+Cupom" if is_last else f"Cupom {j}"
+        label = "Principal+Cupom" if j == len(coupon_flows) else f"Cupom {j}"
         total_pv += pv_i
         flows.append(KRDFlow(label, dui, t, nominal, pv_i, 0, 0))
 

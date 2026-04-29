@@ -9,6 +9,7 @@ Cenarios nomeados do mercado:
 
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import date, datetime
 from .instruments import INSTRUMENTS, pu
 
 
@@ -99,7 +100,10 @@ SCENARIOS: dict[str, ScenarioDefinition] = {
 
 
 def calc_scenario_delta(du: int, du_min: int, du_max: int,
-                         scenario_key: str, magnitude: float) -> float:
+                         scenario_key: str, magnitude: float,
+                         custom_parallel_bps: float = 0.0,
+                         custom_slope_bps: float = 0.0,
+                         custom_curvature_bps: float = 0.0) -> float:
     """Calcula o choque em bps para um vertice especifico.
 
     Args:
@@ -112,8 +116,23 @@ def calc_scenario_delta(du: int, du_min: int, du_max: int,
     du_mid = (du_min + du_max) / 2
     du_range = (du_max - du_min) / 2 or 1
     t = max(-1, min(1, (du - du_mid) / du_range))
+    if scenario_key == "custom":
+        return custom_parallel_bps + custom_slope_bps * t - custom_curvature_bps * (1 - t * t)
     sc = SCENARIOS.get(scenario_key)
     return sc.delta(t, magnitude) if sc else 0
+
+
+def _parse_leg_date(value):
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def calc_leg_pnl(leg: dict, delta_bps: float,
@@ -150,8 +169,10 @@ def calc_leg_pnl(leg: dict, delta_bps: float,
         effective_delta = delta_cupom_bps if delta_cupom_bps != 0 else delta_bps
 
     new_rate = leg["tax_fin"] + effective_delta / 100
-    new_pu = pu(leg["instrument"], new_rate, leg["du"], leg["dc"])
-    old_pu = pu(leg["instrument"], leg["tax_fin"], leg["du"], leg["dc"])
+    liq = _parse_leg_date(leg.get("liq"))
+    venc = leg.get("parsed", {}).get("date") if isinstance(leg.get("parsed"), dict) else None
+    new_pu = pu(leg["instrument"], new_rate, leg["du"], leg["dc"], liq, venc)
+    old_pu = pu(leg["instrument"], leg["tax_fin"], leg["du"], leg["dc"], liq, venc)
     diff = new_pu - old_pu
 
     if info.type == "tpf":

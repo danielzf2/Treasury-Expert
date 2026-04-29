@@ -171,6 +171,19 @@ def _serialize_leg_ref(leg: dict) -> dict:
     }
 
 
+def _parse_br_date(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def _serialize_strategy(strat: dict) -> dict:
     if not strat:
         return {}
@@ -230,9 +243,10 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
         else:
             tax_dir = "Compra taxa" if leg["direction"] == "C" else "Vende taxa"
 
-        pu_val = pu(leg["instrument"], leg["taxa"], du_val, dc_val)
-        dur = duration(leg["instrument"], leg["taxa"], du_val, dc_val)
-        dv = dv01(leg["instrument"], leg["taxa"], du_val, dc_val, leg["quantity"])
+        venc = parsed["date"]
+        pu_val = pu(leg["instrument"], leg["taxa"], du_val, dc_val, liq, venc)
+        dur = duration(leg["instrument"], leg["taxa"], du_val, dc_val, liq, venc)
+        dv = dv01(leg["instrument"], leg["taxa"], du_val, dc_val, leg["quantity"], liq, venc)
         fin = pu_val * leg["quantity"]
         noc = leg["quantity"] * info.face
         exp = get_exposure(leg["instrument"], leg["direction"], leg["taxa"])
@@ -248,7 +262,7 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
                 if leg["direction"] == "C"
                 else leg["taxa"] + corr_value
             )
-            corr_brl = abs(pu(leg["instrument"], tax_fin, du_val, dc_val) - pu_val) * leg["quantity"]
+            corr_brl = abs(pu(leg["instrument"], tax_fin, du_val, dc_val, liq, venc) - pu_val) * leg["quantity"]
             corr_bps = corr_value * 100
         elif corr_type in ("R$/contrato", "R$/titulo"):
             corr_brl = corr_value * leg["quantity"]
@@ -301,6 +315,9 @@ def _rehydrate_legs(legs: list[dict]) -> list[dict]:
             p = parse_ticker(leg.get("instrument", ""), leg.get("ticker", ""))
             if p:
                 leg["parsed"]["date"] = p["date"]
+        liq = _parse_br_date(leg.get("liq"))
+        if liq:
+            leg["liq"] = liq
         result.append(leg)
     return result
 
@@ -331,6 +348,9 @@ class CurveChartRequest(BaseModel):
     magnitude: float
     di1: list[dict] = []
     dap: list[dict] = []
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 class PnlBarsRequest(BaseModel):
@@ -340,6 +360,9 @@ class PnlBarsRequest(BaseModel):
     delta_fx_pct: float = 0.0
     delta_ipca_bps: float = 0.0
     delta_cupom_bps: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 class PnlConsolidatedRequest(BaseModel):
@@ -378,6 +401,9 @@ class MtmTableRequest(BaseModel):
     delta_fx_pct: float = 0.0
     delta_ipca_bps: float = 0.0
     delta_cupom_bps: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +472,9 @@ def chart_curve(req: CurveChartRequest):
         legs, req.scenario_key, req.magnitude,
         di1_curve=req.di1 or None,
         dap_curve=req.dap or None,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -462,6 +491,9 @@ def chart_pnl_bars(req: PnlBarsRequest):
         delta_fx_pct=req.delta_fx_pct,
         delta_ipca_bps=req.delta_ipca_bps,
         delta_cupom_bps=req.delta_cupom_bps,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -581,7 +613,10 @@ def mtm_table(req: MtmTableRequest):
             if l["info"] and l["info"].conv == "price":
                 delta = 0.0
             else:
-                delta = calc_scenario_delta(l["du"], du_min, du_max, req.scenario_key, m)
+                delta = calc_scenario_delta(
+                    l["du"], du_min, du_max, req.scenario_key, m,
+                    req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+                )
 
             pnl = calc_leg_pnl(
                 l, delta,

@@ -47,7 +47,7 @@ def _cached_fetch(key: str, url: str, headers: dict = None, ttl: int = CACHE_TTL
     if key in _cache and (now - _cache[key].timestamp) < ttl:
         return _cache[key].data
     data = _fetch_json(url, headers)
-    if "error" not in data:
+    if "error" not in data and data:
         _cache[key] = CacheEntry(data, now)
     return data
 
@@ -284,12 +284,12 @@ def fetch_all(anbima_client_id: str = "", anbima_secret: str = "", sandbox: bool
     snap.timestamp = datetime.now(brt).strftime("%d/%m/%Y %H:%M:%S")
 
     # BCB
-    cdi_data = fetch_cdi_over(1)
+    cdi_data = fetch_cdi_over(5)
     if cdi_data and not isinstance(cdi_data, dict):
         snap.cdi_over_dia = float(cdi_data[-1].get("valor", 0))
         snap.cdi_aa = cdi_over_to_annual(snap.cdi_over_dia)
 
-    ptax_data = fetch_ptax(1)
+    ptax_data = fetch_ptax(5)
     if ptax_data and not isinstance(ptax_data, dict):
         snap.ptax = float(ptax_data[-1].get("valor", 0))
 

@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from starlette.applications import Starlette
 from starlette.routing import Mount, Route
-from starlette.responses import JSONResponse, FileResponse
+from starlette.responses import JSONResponse, FileResponse, Response
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 log = logging.getLogger("treasury-web")
@@ -89,8 +89,34 @@ async def serve_index(request):
     return JSONResponse({"error": "Frontend not found"}, status_code=404)
 
 
+async def mcp_no_slash(request):
+    """Serve MCP requests sent to /mcp as if they were sent to /mcp/."""
+    scope = dict(request.scope)
+    scope["path"] = "/"
+    scope["raw_path"] = b"/"
+    status = 500
+    headers: list[tuple[bytes, bytes]] = []
+    chunks: list[bytes] = []
+
+    async def send(message):
+        nonlocal status, headers
+        if message["type"] == "http.response.start":
+            status = message["status"]
+            headers = message.get("headers", [])
+        elif message["type"] == "http.response.body":
+            chunks.append(message.get("body", b""))
+
+    await mcp_app(scope, request.receive, send)
+    return Response(
+        b"".join(chunks),
+        status_code=status,
+        headers={k.decode("latin-1"): v.decode("latin-1") for k, v in headers},
+    )
+
+
 routes = [
     Route("/health", root_health),
+    Route("/mcp", mcp_no_slash, methods=["GET", "POST", "DELETE"]),
     Mount("/sim", app=api),
     Mount("/api", app=api),
     Mount("/mcp", app=mcp_app),
