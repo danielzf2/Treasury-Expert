@@ -17,11 +17,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from starlette.applications import Starlette
 from starlette.routing import Mount, Route
-from starlette.responses import JSONResponse, FileResponse
+from starlette.responses import JSONResponse
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 log = logging.getLogger("treasury-web")
@@ -68,20 +67,9 @@ mcp_app = mcp.http_app(path="/", stateless_http=True)
 
 # ── Combined ASGI App ────────────────────────────────────────────────────────
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
-INDEX_HTML = STATIC_DIR / "index.html"
-
-
 async def root_health(request):
     idx = get_index()
     return JSONResponse({"status": "healthy", "documents": len(idx.documents), "sections": len(idx.sections)})
-
-
-async def spa_fallback(request):
-    """Serve index.html for any route not matched by API/MCP/static — SPA client-side routing."""
-    if INDEX_HTML.exists():
-        return FileResponse(str(INDEX_HTML), media_type="text/html")
-    return JSONResponse({"error": "Frontend not found"}, status_code=404)
 
 
 routes = [
@@ -89,13 +77,6 @@ routes = [
     Mount("/api", app=api),
     Mount("/mcp", app=mcp_app),
 ]
-
-if STATIC_DIR.exists():
-    routes.append(Mount("/assets", app=StaticFiles(directory=str(STATIC_DIR / "assets"))))
-    routes.append(Route("/{path:path}", spa_fallback))
-    log.info("Serving frontend from %s", STATIC_DIR)
-else:
-    log.warning("Frontend not found at %s — skipping static files", STATIC_DIR)
 
 app = Starlette(routes=routes, lifespan=mcp_app.lifespan)
 
