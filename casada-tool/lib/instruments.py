@@ -45,7 +45,7 @@ def _add_months(d: date, months: int) -> date:
 
 
 def _coupon_cashflows(instrumento: str, liq_date: date | None,
-                      venc_date: date | None, du_fallback: int) -> list[tuple[int, float]]:
+                      venc_date: date | None, du_fallback: int) -> list[tuple[date | None, int, float]]:
     """Retorna fluxos semestrais em DU reais, alinhados ao vencimento."""
     info = INSTRUMENTS[instrumento]
     face_calc = 100 if instrumento == "NTN-B" else info.face
@@ -54,6 +54,7 @@ def _coupon_cashflows(instrumento: str, liq_date: date | None,
         n_sem = max(1, math.ceil(du_fallback / 126))
         return [
             (
+                None,
                 round(du_fallback - (n_sem - j) * 126),
                 face_calc * (1 + info.cup_sem) if j == n_sem else face_calc * info.cup_sem,
             )
@@ -70,13 +71,13 @@ def _coupon_cashflows(instrumento: str, liq_date: date | None,
         d = _add_months(d, -6)
     coupon_dates.sort()
 
-    flows: list[tuple[int, float]] = []
+    flows: list[tuple[date | None, int, float]] = []
     for d in coupon_dates:
         dui = du_entre(liq_date, d)
         if dui <= 0:
             continue
         flow = face_calc * (1 + info.cup_sem) if d == venc_date else face_calc * info.cup_sem
-        flows.append((dui, flow))
+        flows.append((d, dui, flow))
     return flows
 
 
@@ -113,7 +114,7 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
         return info.face / (1 + r) ** (du / 252)
 
     total = 0.0
-    for dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
+    for _, dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
         total += flow / (1 + r) ** (dui / 252)
     return total
 
@@ -156,7 +157,7 @@ def duration(instrumento: str, taxa: float, du: int, dc: int = 0,
 
     sum_pv = 0.0
     sum_t_pv = 0.0
-    for dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
+    for _, dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
         t = dui / 252
         pv_i = flow / (1 + r) ** t
         sum_pv += pv_i
@@ -204,6 +205,7 @@ def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int,
 @dataclass
 class KRDFlow:
     label: str
+    payment_date: date | None
     du: int
     t_anos: float
     nominal: float
@@ -233,12 +235,12 @@ def key_rate_duration(instrumento: str, taxa: float, du: int,
     flows: list[KRDFlow] = []
     total_pv = 0.0
     coupon_flows = _coupon_cashflows(instrumento, liq_date, venc_date, du)
-    for j, (dui, nominal) in enumerate(coupon_flows, start=1):
+    for j, (payment_date, dui, nominal) in enumerate(coupon_flows, start=1):
         t = dui / 252
         pv_i = nominal / (1 + r) ** t
         label = "Principal+Cupom" if j == len(coupon_flows) else f"Cupom {j}"
         total_pv += pv_i
-        flows.append(KRDFlow(label, dui, t, nominal, pv_i, 0, 0))
+        flows.append(KRDFlow(label, payment_date, dui, t, nominal, pv_i, 0, 0))
 
     for f in flows:
         f.peso = f.pv / total_pv if total_pv else 0

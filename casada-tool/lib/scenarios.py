@@ -117,7 +117,8 @@ def calc_scenario_delta(du: int, du_min: int, du_max: int,
     du_range = (du_max - du_min) / 2 or 1
     t = max(-1, min(1, (du - du_mid) / du_range))
     if scenario_key == "custom":
-        return custom_parallel_bps + custom_slope_bps * t - custom_curvature_bps * (1 - t * t)
+        scale = magnitude / 10 if magnitude else 0
+        return scale * (custom_parallel_bps + custom_slope_bps * t - custom_curvature_bps * (1 - t * t))
     sc = SCENARIOS.get(scenario_key)
     return sc.delta(t, magnitude) if sc else 0
 

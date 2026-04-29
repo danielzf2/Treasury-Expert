@@ -295,15 +295,24 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
 
 
 def chart_pnl_consolidado(legs: list[dict],
+                           scenario_key: str = "bear_par",
+                           magnitude: float = 10.0,
                            delta_fx_pct: float = 0.0,
                            delta_ipca_bps: float = 0.0,
-                           delta_cupom_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(-15, 16))
+                           delta_cupom_bps: float = 0.0,
+                           custom_parallel_bps: float = 0.0,
+                           custom_slope_bps: float = 0.0,
+                           custom_curvature_bps: float = 0.0) -> go.Figure:
+    deltas_range = list(range(-20, 21))
+    du_min, du_max = _rate_du_range(legs)
     total_pnl = []
     for d in deltas_range:
         t = 0.0
         for l in legs:
-            leg_d = d if _is_rate_leg(l) else 0.0
+            leg_d = _leg_delta(
+                l, du_min, du_max, scenario_key, d,
+                custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+            )
             t += calc_leg_pnl(l, leg_d,
                               delta_fx_pct=delta_fx_pct,
                               delta_ipca_bps=delta_ipca_bps,
@@ -314,8 +323,8 @@ def chart_pnl_consolidado(legs: list[dict],
 
     fig = go.Figure(go.Bar(x=deltas_range, y=total_pnl, marker_color=colors))
     fig.update_layout(
-        **_base_layout("P&L Consolidado — Shift Paralelo", 350),
-        xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),
+        **_base_layout("P&L Consolidado — Cenário Selecionado", 350),
+        xaxis=dict(title="Magnitude do cenário (bps)", dtick=5, gridcolor=_GRID),
         yaxis=dict(
             title="P&L (R$)", zeroline=True,
             zerolinecolor=_ZERO, gridcolor=_GRID),
@@ -325,19 +334,32 @@ def chart_pnl_consolidado(legs: list[dict],
 
 
 def chart_pnl_por_perna(legs: list[dict],
+                         scenario_key: str = "bear_par",
+                         magnitude: float = 10.0,
                          delta_fx_pct: float = 0.0,
                          delta_ipca_bps: float = 0.0,
-                         delta_cupom_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(-15, 16))
+                         delta_cupom_bps: float = 0.0,
+                         custom_parallel_bps: float = 0.0,
+                         custom_slope_bps: float = 0.0,
+                         custom_curvature_bps: float = 0.0) -> go.Figure:
+    deltas_range = list(range(-20, 21))
+    du_min, du_max = _rate_du_range(legs)
     fig = go.Figure()
     for i, l in enumerate(legs):
         name = f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
         if _is_rate_leg(l):
-            pnls = [calc_leg_pnl(l, d,
-                                 delta_fx_pct=delta_fx_pct,
-                                 delta_ipca_bps=delta_ipca_bps,
-                                 delta_cupom_bps=delta_cupom_bps)
-                    for d in deltas_range]
+            pnls = []
+            for d in deltas_range:
+                leg_d = _leg_delta(
+                    l, du_min, du_max, scenario_key, d,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+                pnls.append(calc_leg_pnl(
+                    l, leg_d,
+                    delta_fx_pct=delta_fx_pct,
+                    delta_ipca_bps=delta_ipca_bps,
+                    delta_cupom_bps=delta_cupom_bps,
+                ))
         else:
             pnls = [calc_leg_pnl(l, 0,
                                  delta_fx_pct=delta_fx_pct,
@@ -349,8 +371,8 @@ def chart_pnl_por_perna(legs: list[dict],
             line=dict(color=COLORS[i % len(COLORS)], width=2),
         ))
     fig.update_layout(
-        **_base_layout("P&L por Perna — Shift Paralelo", 350),
-        xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),
+        **_base_layout("P&L por Perna — Cenário Selecionado", 350),
+        xaxis=dict(title="Magnitude do cenário (bps)", dtick=5, gridcolor=_GRID),
         yaxis=dict(
             title="P&L (R$)", zeroline=True,
             zerolinecolor=_ZERO, gridcolor=_GRID),

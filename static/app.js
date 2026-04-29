@@ -9,6 +9,17 @@ const SCENARIOS = {
     pos_fly:"Positive Butterfly", neg_fly:"Negative Butterfly",
     custom:"Custom"
 };
+const SCENARIO_DESCS = {
+    bull_par:"Todas as taxas caem de forma paralela. Bom para posições compradas em duration.",
+    bear_par:"Todas as taxas sobem de forma paralela. Bom para posições vendidas em duration.",
+    bull_steep:"Curtos caem mais que longos. Mostra exposição a inclinação quando o vértice curto lidera o rally.",
+    bear_steep:"Longos sobem mais que curtos. Captura abertura de prêmio de prazo.",
+    bull_flat:"Longos caem mais que curtos. Útil para testar fechamento da parte longa.",
+    bear_flat:"Curtos sobem mais que longos. Útil em choque de política monetária no front-end da curva.",
+    pos_fly:"Barriga sobe e pontas caem. Testa risco de curvatura contra posições concentradas no miolo.",
+    neg_fly:"Barriga cai e pontas sobem. Testa ganho/perda em estruturas compradas na barriga.",
+    custom:"Combina paralelo, inclinação e curvatura com os sliders abaixo.",
+};
 
 function brDate() {
     const now = new Date();
@@ -18,6 +29,14 @@ function brDate() {
     return br.getUTCFullYear() + "-" +
         String(br.getUTCMonth() + 1).padStart(2, "0") + "-" +
         String(br.getUTCDate()).padStart(2, "0");
+}
+
+function fmtMoney(v, digits=0) {
+    return `R$ ${(v || 0).toLocaleString("pt-BR",{maximumFractionDigits:digits, minimumFractionDigits:digits})}`;
+}
+
+function fmtNumber(v, digits=2) {
+    return (v || 0).toLocaleString("pt-BR",{maximumFractionDigits:digits, minimumFractionDigits:digits});
 }
 
 const state = {
@@ -178,6 +197,7 @@ function renderResults() {
     renderRiskFactors(r);
     renderDetails(r);
     renderSpreadCosts(r);
+    renderCashflows(r);
 }
 
 function renderMetrics(r) {
@@ -272,6 +292,61 @@ function renderSpreadCosts(r) {
     el.innerHTML = html;
 }
 
+function renderCashflows(r, flowPnl=[]) {
+    const el = document.getElementById("krdSection");
+    const legs = (r.legs || []).filter(l => l.cashflows && l.cashflows.flows && l.cashflows.flows.length);
+    if (!legs.length) { el.innerHTML = ""; return; }
+
+    const pnlByLeg = new Map(flowPnl.map(fp => [`${fp.instrument}:${fp.ticker}:${fp.direction}`, fp]));
+    let html = '<hr class="divider">';
+    legs.forEach((l, idx) => {
+        const cf = l.cashflows;
+        const pnl = pnlByLeg.get(`${l.instrument}:${l.ticker}:${l.direction}`);
+        html += `<div class="sim-card"><div class="sim-card-h">Fluxos, Cupons e Principal — ${l.instrument} ${l.parsed_label}</div>`;
+        html += '<div class="metrics">';
+        html += `<div class="metric"><div class="label">PV dos Fluxos</div><div class="value">${fmtMoney(cf.pv_total,2)}</div></div>`;
+        html += `<div class="metric"><div class="label">Duration Macaulay</div><div class="value">${fmtNumber(cf.duration_macaulay,2)} anos</div></div>`;
+        html += `<div class="metric"><div class="label">Duration ANBIMA</div><div class="value">${fmtNumber(cf.duration_anbima_du,0)} DU</div></div>`;
+        html += `<div class="metric"><div class="label">P&L por Fluxo</div><div class="value ${pnl && pnl.total>=0?"green":"red"}">${pnl?fmtMoney(pnl.total,0):"--"}</div></div>`;
+        html += '</div>';
+        html += `<div id="krdChart${idx}" style="min-height:260px"></div>`;
+        html += '<div style="overflow-x:auto"><table class="sim-tbl"><tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">Nominal</th><th class="tr">PV</th><th class="tr">Peso</th><th class="tr">KRD</th><th class="tr">Delta</th><th class="tr">P&L</th></tr>';
+        cf.flows.forEach(f => {
+            const pf = pnl?.flows?.find(x => x.label === f.label && x.du === f.du);
+            const pnlClass = pf ? (pf.pnl > 1 ? " green" : (pf.pnl < -1 ? " red" : "")) : "";
+            html += `<tr><td>${f.label}</td><td class="mono">${f.payment_date || "--"}</td><td class="tc mono">${f.du}</td>`;
+            html += `<td class="tr mono">${fmtMoney(f.nominal,2)}</td><td class="tr mono">${fmtMoney(f.pv,2)}</td>`;
+            html += `<td class="tr mono">${fmtNumber(f.peso*100,1)}%</td><td class="tr mono">${fmtNumber(f.krd,4)}</td>`;
+            html += `<td class="tr mono">${pf?fmtNumber(pf.delta_bps,1)+" bps":"--"}</td><td class="tr mono${pnlClass}">${pf?fmtMoney(pf.pnl,0):"--"}</td></tr>`;
+        });
+        html += `<tr class="av-result"><td>Total</td><td></td><td></td><td></td><td class="tr mono">${fmtMoney(cf.pv_total,2)}</td><td class="tr mono">100,0%</td><td class="tr mono">${fmtNumber(cf.duration_macaulay,4)}</td><td></td><td class="tr mono">${pnl?fmtMoney(pnl.total,0):"--"}</td></tr>`;
+        html += '</table></div></div>';
+    });
+    el.innerHTML = html;
+
+    legs.forEach((l, idx) => {
+        const flows = l.cashflows.flows;
+        Plotly.newPlot(`krdChart${idx}`, [{
+            x: flows.map(f => `${f.label}<br>${f.payment_date || f.du+" DU"}`),
+            y: flows.map(f => f.krd),
+            type: "bar",
+            marker: {color: "#58a6ff"},
+            text: flows.map(f => fmtNumber(f.krd,3)),
+            textposition: "outside",
+        }], {
+            template:"none",
+            paper_bgcolor:"rgba(0,0,0,0)",
+            plot_bgcolor:"rgba(0,0,0,0)",
+            font:{family:"Inter, -apple-system, BlinkMacSystemFont, sans-serif", size:11, color:"#c9d1d9"},
+            margin:{l:50,r:20,t:20,b:70},
+            height:280,
+            xaxis:{gridcolor:"rgba(100,100,100,0.15)"},
+            yaxis:{title:"Contribuição para duration (anos)", gridcolor:"rgba(100,100,100,0.15)"},
+            showlegend:false,
+        }, {displayModeBar:false, responsive:true});
+    });
+}
+
 function renderScenarios() {
     if (!state.results) return;
     const hasRateLegs = state.results.legs.some(l => l.info_conv !== "price");
@@ -288,10 +363,12 @@ function renderScenarioRadio() {
     el.innerHTML = Object.entries(SCENARIOS).map(([k,v]) =>
         `<label><input type="radio" name="scenario" value="${k}" ${k===state.scenarioKey?"checked":""} onchange="changeScenario('${k}')"><span>${v}</span></label>`
     ).join("");
+    document.getElementById("scenarioDesc").textContent = SCENARIO_DESCS[state.scenarioKey] || "";
 }
 
 function changeScenario(key) {
     state.scenarioKey = key;
+    renderScenarioRadio();
     renderSliders();
     loadCharts();
 }
@@ -356,6 +433,7 @@ async function loadCharts() {
             `<div class="metric"><div class="label">P&L Total do Cenário</div><div class="value ${mtm.total_pnl>=0?"green":"red"}">R$ ${mtm.total_pnl>=0?"+":""}${mtm.total_pnl.toLocaleString("pt-BR",{maximumFractionDigits:0})}</div></div>`;
     }
     if (mtm && mtm.table) renderMtmTable(mtm.table, r.legs);
+    if (mtm && mtm.flow_pnl) renderCashflows(r, mtm.flow_pnl);
 
     renderChartTabs();
 }

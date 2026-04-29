@@ -210,6 +210,46 @@ def _serialize_hedge(hedge: dict | None) -> dict | None:
     return out
 
 
+def _cashflow_breakdown(leg: dict) -> dict | None:
+    info = leg.get("info")
+    if not info or info.cup_sem <= 0:
+        return None
+
+    flows = key_rate_duration(
+        leg["instrument"],
+        leg["taxa"],
+        leg["du"],
+        leg.get("liq"),
+        leg.get("parsed", {}).get("date"),
+    )
+    if not flows:
+        return None
+
+    rows = []
+    pv_total = sum(f.pv for f in flows)
+    duration_macaulay = sum(f.krd for f in flows)
+    duration_anbima_du = sum(f.du * f.pv for f in flows) / pv_total if pv_total else 0.0
+
+    for f in flows:
+        rows.append({
+            "label": f.label,
+            "payment_date": f.payment_date.strftime("%d/%m/%Y") if f.payment_date else "",
+            "du": f.du,
+            "t_anos": f.t_anos,
+            "nominal": f.nominal,
+            "pv": f.pv,
+            "peso": f.peso,
+            "krd": f.krd,
+        })
+
+    return {
+        "flows": rows,
+        "pv_total": pv_total,
+        "duration_macaulay": duration_macaulay,
+        "duration_anbima_du": duration_anbima_du,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Leg processing (mirrors Streamlit's process_legs)
 # ---------------------------------------------------------------------------
@@ -268,7 +308,7 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
             corr_brl = corr_value * leg["quantity"]
             corr_bps = corr_brl / dv.total if dv.total > 0 else 0
 
-        results.append({
+        processed = {
             "instrument": leg["instrument"],
             "direction": leg["direction"],
             "ticker": leg["ticker"],
@@ -294,7 +334,9 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
             "corr_brl": corr_brl,
             "corr_bps": corr_bps,
             "exp": exp,
-        })
+        }
+        processed["cashflows"] = _cashflow_breakdown(processed)
+        results.append(processed)
 
     return results
 
@@ -367,9 +409,14 @@ class PnlBarsRequest(BaseModel):
 
 class PnlConsolidatedRequest(BaseModel):
     legs: list[dict]
+    scenario_key: str = "bear_par"
+    magnitude: float = 10.0
     delta_fx_pct: float = 0.0
     delta_ipca_bps: float = 0.0
     delta_cupom_bps: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 class CupomChartRequest(BaseModel):
@@ -507,9 +554,14 @@ def chart_pnl_consolidated(req: PnlConsolidatedRequest):
     legs = _rehydrate_legs(req.legs)
     fig = chart_pnl_consolidado(
         legs,
+        scenario_key=req.scenario_key,
+        magnitude=req.magnitude,
         delta_fx_pct=req.delta_fx_pct,
         delta_ipca_bps=req.delta_ipca_bps,
         delta_cupom_bps=req.delta_cupom_bps,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -523,9 +575,14 @@ def chart_pnl_per_leg(req: PnlConsolidatedRequest):
     legs = _rehydrate_legs(req.legs)
     fig = chart_pnl_por_perna(
         legs,
+        scenario_key=req.scenario_key,
+        magnitude=req.magnitude,
         delta_fx_pct=req.delta_fx_pct,
         delta_ipca_bps=req.delta_ipca_bps,
         delta_cupom_bps=req.delta_cupom_bps,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -595,6 +652,54 @@ def get_tickers(instrument: str):
 _MTM_STEPS = [-20, -15, -10, -5, -2, -1, 0, 1, 2, 5, 10, 15, 20]
 
 
+def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
+                      du_min: int, du_max: int) -> dict | None:
+    cashflows = leg.get("cashflows") or {}
+    flows = cashflows.get("flows") or []
+    if not flows:
+        return None
+
+    info = leg.get("info") or INSTRUMENTS.get(leg.get("instrument"))
+    if not info or info.type != "tpf":
+        return None
+
+    sign = 1 if leg["direction"] == "C" else -1
+    base_rate = leg["tax_fin"]
+    rows = []
+    total = 0.0
+    for f in flows:
+        delta = calc_scenario_delta(
+            f["du"], du_min, du_max, req.scenario_key, req.magnitude,
+            req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+        )
+        effective_delta = req.delta_ipca_bps if leg["instrument"] == "NTN-B" and req.delta_ipca_bps != 0 else delta
+        old_rate = base_rate / 100
+        new_rate = (base_rate + effective_delta / 100) / 100
+        t = f["du"] / 252
+        old_pv = f["nominal"] / (1 + old_rate) ** t
+        new_pv = f["nominal"] / (1 + new_rate) ** t
+        pnl = sign * (new_pv - old_pv) * leg["quantity"]
+        total += pnl
+        rows.append({
+            "label": f["label"],
+            "payment_date": f.get("payment_date", ""),
+            "du": f["du"],
+            "nominal": f["nominal"],
+            "pv": old_pv,
+            "delta_bps": effective_delta,
+            "pnl": round(pnl, 2),
+        })
+
+    return {
+        "instrument": leg["instrument"],
+        "ticker": leg["ticker"],
+        "parsed_label": leg.get("parsed_label") or leg.get("parsed", {}).get("label", ""),
+        "direction": leg["direction"],
+        "total": round(total, 2),
+        "flows": rows,
+    }
+
+
 @router.post("/mtm-table")
 def mtm_table(req: MtmTableRequest):
     legs = _rehydrate_legs(req.legs)
@@ -633,5 +738,10 @@ def mtm_table(req: MtmTableRequest):
             "total": round(row_total, 2),
         })
 
+    flow_pnl = [
+        fp for fp in (_flow_pnl_for_leg(l, req, du_min, du_max) for l in legs)
+        if fp is not None
+    ]
+
     mag_row = next((r for r in rows if r["delta"] == req.magnitude), rows[len(rows)//2])
-    return {"table": rows, "total_pnl": mag_row["total"]}
+    return {"table": rows, "total_pnl": mag_row["total"], "flow_pnl": flow_pnl}
