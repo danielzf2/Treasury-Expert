@@ -137,8 +137,14 @@ def _serialize_leg(leg: dict) -> dict:
             out["info_type"] = v.type
             out["info_conv"] = v.conv
             out["info_benchmark"] = v.benchmark
+            out["info_face"] = v.face
+            out["info_mult"] = v.mult
         elif k == "parsed":
-            out["parsed"] = {"label": v["label"], "full": v["full"]}
+            out["parsed_label"] = v["label"]
+            out["parsed_full"] = v["full"]
+        elif k == "exp":
+            out["exp_ativo"] = v.get("ativo", "—")
+            out["exp_passivo"] = v.get("passivo", "—")
         elif k == "liq":
             out["liq"] = v.strftime("%d/%m/%Y") if isinstance(v, date) else v
         else:
@@ -148,6 +154,8 @@ def _serialize_leg(leg: dict) -> dict:
 
 def _serialize_leg_ref(leg: dict) -> dict:
     """Extract key fields from a leg dict used as a reference inside strategy/hedge."""
+    parsed = leg.get("parsed", {})
+    label = parsed.get("label", "") if isinstance(parsed, dict) else ""
     return {
         "instrument": leg.get("instrument"),
         "ticker": leg.get("ticker"),
@@ -159,9 +167,7 @@ def _serialize_leg_ref(leg: dict) -> dict:
         "dv01_total": leg.get("dv01_total"),
         "d_mac": leg.get("d_mac"),
         "quantity": leg.get("quantity"),
-        "parsed": {"label": leg["parsed"]["label"], "full": leg["parsed"]["full"]}
-        if isinstance(leg.get("parsed"), dict) and "label" in leg.get("parsed", {})
-        else leg.get("parsed"),
+        "parsed_label": label,
     }
 
 
@@ -172,6 +178,8 @@ def _serialize_strategy(strat: dict) -> dict:
     for k, v in strat.items():
         if isinstance(v, dict) and "info" in v:
             out[k] = _serialize_leg_ref(v)
+            out[f"{k}_taxa"] = v.get("taxa", 0)
+            out[f"{k}_inst"] = v.get("instrument", "")
         else:
             out[k] = _serialize(v)
     return out
@@ -278,19 +286,21 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
 
 
 def _rehydrate_legs(legs: list[dict]) -> list[dict]:
-    """Re-attach InstrumentInfo objects to legs received from the API client."""
+    """Re-attach InstrumentInfo objects and parsed dicts to legs from the client."""
     result: list[dict] = []
     for leg in legs:
         leg = dict(leg)
         leg["info"] = INSTRUMENTS.get(leg.get("instrument"))
-        if isinstance(leg.get("parsed"), dict) and "date" not in leg["parsed"]:
-            p = parse_ticker(leg["instrument"], leg.get("ticker", ""))
-            if p:
-                leg["parsed"]["date"] = p["date"]
-        elif "parsed" not in leg and "ticker" in leg:
-            p = parse_ticker(leg["instrument"], leg["ticker"])
+        if "parsed" not in leg or not isinstance(leg.get("parsed"), dict):
+            p = parse_ticker(leg.get("instrument", ""), leg.get("ticker", ""))
             if p:
                 leg["parsed"] = p
+            else:
+                leg["parsed"] = {"label": leg.get("parsed_label", ""), "full": leg.get("parsed_full", ""), "date": date.today()}
+        if isinstance(leg["parsed"], dict) and "date" not in leg["parsed"]:
+            p = parse_ticker(leg.get("instrument", ""), leg.get("ticker", ""))
+            if p:
+                leg["parsed"]["date"] = p["date"]
         result.append(leg)
     return result
 
@@ -409,12 +419,17 @@ def process(req: ProcessRequest):
     if has_cupom_tpf:
         hedge = suggest_hedge(valid)
 
+    total_dv01 = sum(l["dv01_total"] for l in valid)
+    total_fin = sum(l["fin"] for l in valid if l["info"].conv != "price")
+
     return {
         "legs": [_serialize_leg(l) for l in valid],
         "strategy": _serialize_strategy(strat),
         "risk_factors": risk_factors,
         "total_corr": total_corr,
         "total_corr_bps": total_corr_bps,
+        "total_dv01": total_dv01,
+        "total_fin": total_fin,
         "hedge": _serialize_hedge(hedge),
     }
 
@@ -560,6 +575,7 @@ def mtm_table(req: MtmTableRequest):
         per_leg: list[dict] = []
         row_total = 0.0
 
+        pnls = []
         for l in legs:
             if l["info"] and l["info"].conv == "price":
                 delta = 0.0
@@ -573,13 +589,13 @@ def mtm_table(req: MtmTableRequest):
                 delta_cupom_bps=req.delta_cupom_bps,
             )
             row_total += pnl
-            label = f"{l['instrument']} {l['parsed']['label']}" if isinstance(l.get("parsed"), dict) else l["instrument"]
-            per_leg.append({"label": label, "pnl": round(pnl, 2)})
+            pnls.append(round(pnl, 2))
 
         rows.append({
-            "delta_bps": m,
-            "per_leg": per_leg,
+            "delta": m,
+            "pnls": pnls,
             "total": round(row_total, 2),
         })
 
-    return rows
+    mag_row = next((r for r in rows if r["delta"] == req.magnitude), rows[len(rows)//2])
+    return {"table": rows, "total_pnl": mag_row["total"]}
