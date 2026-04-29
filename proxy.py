@@ -86,12 +86,24 @@ async def _proxy_ws(websocket: WebSocket) -> None:
     await websocket.accept()
 
     try:
-        async with websockets.connect(ws_url) as ws_upstream:
+        async with websockets.connect(
+            ws_url,
+            max_size=2**24,
+            ping_interval=20,
+            ping_timeout=60,
+            close_timeout=10,
+        ) as ws_upstream:
+
             async def client_to_upstream():
                 try:
                     while True:
-                        data = await websocket.receive_text()
-                        await ws_upstream.send(data)
+                        msg = await websocket.receive()
+                        if "text" in msg:
+                            await ws_upstream.send(msg["text"])
+                        elif "bytes" in msg:
+                            await ws_upstream.send(msg["bytes"])
+                        else:
+                            break
                 except Exception:
                     pass
 
@@ -105,9 +117,15 @@ async def _proxy_ws(websocket: WebSocket) -> None:
                 except Exception:
                     pass
 
-            await asyncio.gather(client_to_upstream(), upstream_to_client())
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(client_to_upstream()),
+                 asyncio.create_task(upstream_to_client())],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
     except Exception as e:
-        log.debug("WS proxy closed: %s", e)
+        log.debug("WS proxy ended: %s", e)
     finally:
         try:
             await websocket.close()
