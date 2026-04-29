@@ -117,11 +117,13 @@ async def _proxy_ws(websocket: WebSocket) -> None:
 
 app = Starlette(
     routes=[
+        WebSocketRoute("/_stcore/stream", _proxy_ws),
+        WebSocketRoute("/_stcore/{path:path}", _proxy_ws),
         WebSocketRoute("/_stm/{path:path}", _proxy_ws),
         WebSocketRoute("/_stm", _proxy_ws),
         WebSocketRoute("/stream", _proxy_ws),
-        Route("/{path:path}", _proxy_http, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
-        Route("/", _proxy_http, methods=["GET", "POST"]),
+        Route("/{path:path}", _proxy_http, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]),
+        Route("/", _proxy_http, methods=["GET", "POST", "HEAD"]),
     ],
 )
 
