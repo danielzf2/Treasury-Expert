@@ -436,9 +436,9 @@ def pnl_per_leg_parallel(leg: dict, delta_bps: float,
 
     effective_delta = delta_bps
     if inst in ("NTN-B", "DAP"):
-        effective_delta = delta_ipca_bps if delta_ipca_bps != 0 else delta_bps
+        effective_delta = delta_bps + delta_ipca_bps
     elif inst in ("DDI", "FRC"):
-        effective_delta = delta_cupom_bps if delta_cupom_bps != 0 else delta_bps
+        effective_delta = delta_bps + delta_cupom_bps
 
     new_rate = taxa + effective_delta / 100.0
     new_pu = _pu_for_leg(inst, new_rate, du, dc, liq, venc, vna)

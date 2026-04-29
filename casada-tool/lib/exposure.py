@@ -213,10 +213,12 @@ def _build_result_label(cancelled: list[dict], residual: list[dict]) -> str:
     elif ipca_cancel and ipca_cancel["spread_bps"]:
         base = f"CDI {ipca_cancel['spread_bps']:+.0f} bps"
 
-    # Fatores residuais (incluindo CDI quando relevante)
+    # Fatores residuais — CDI omitido quando ja esta implicito no base (CDI +X bps)
     residual_parts: list[str] = []
     for r in residual:
         factor = r["factor"]
+        if factor == "CDI" and base:
+            continue  # CDI ja esta implicito em "CDI +X bps"
         rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
         dir_str = "recebe" if r["direction"] == "recebe" else "paga"
         residual_parts.append(f"{dir_str} {factor}{rate_str}")

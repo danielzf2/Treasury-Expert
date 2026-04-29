@@ -164,11 +164,15 @@ def calc_leg_pnl(leg: dict, delta_bps: float,
         delta_pts = leg["taxa"] * delta_fx_pct / 100
         return sign * delta_pts * info.mult * leg["quantity"]
 
+    # Choque total = cenario (delta_bps) + slider especifico (aditivo).
+    # Para NTN-B/DAP: cenario aplica na curva real + slider delta_ipca adicional.
+    # Para DDI/FRC: cenario aplica na curva cupom + slider delta_cupom adicional.
+    # Para LTN/NTN-F/DI1/LFT: cenario aplica na curva pre (sem slider adicional).
     effective_delta = delta_bps
     if inst in ("NTN-B", "DAP"):
-        effective_delta = delta_ipca_bps if delta_ipca_bps != 0 else delta_bps
+        effective_delta = delta_bps + delta_ipca_bps
     elif inst in ("DDI", "FRC"):
-        effective_delta = delta_cupom_bps if delta_cupom_bps != 0 else delta_bps
+        effective_delta = delta_bps + delta_cupom_bps
 
     new_rate = leg["tax_fin"] + effective_delta / 100
     liq = _parse_leg_date(leg.get("liq"))
