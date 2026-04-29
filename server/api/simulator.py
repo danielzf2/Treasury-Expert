@@ -648,6 +648,11 @@ class CupomChartRequest(BaseModel):
     frc_contracts: list[dict]
     delta_cupom_bps: float = 0.0
     legs: list[dict] = []
+    scenario_key: str = "bull_par"
+    magnitude: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 class ForwardChartRequest(BaseModel):
@@ -658,12 +663,36 @@ class ForwardChartRequest(BaseModel):
     delta_cupom_bps: float = 0.0
     delta_fx_pct: float = 0.0
     legs: list[dict] = []
+    scenario_key: str = "bull_par"
+    magnitude: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
 
 
 class RealChartRequest(BaseModel):
     dap_contracts: list[dict]
     delta_ipca_bps: float = 0.0
     legs: list[dict] = []
+    scenario_key: str = "bull_par"
+    magnitude: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
+
+
+class DecompositionRequest(BaseModel):
+    legs: list[dict]
+    scenario_key: str = "bull_par"
+    magnitude: float = 0.0
+    delta_fx_pct: float = 0.0
+    delta_ipca_bps: float = 0.0
+    delta_cupom_bps: float = 0.0
+    custom_parallel_bps: float = 0.0
+    custom_slope_bps: float = 0.0
+    custom_curvature_bps: float = 0.0
+    di1: list[dict] = []
+    dap: list[dict] = []
 
 
 class MtmTableRequest(BaseModel):
@@ -839,6 +868,11 @@ def chart_cupom(req: CupomChartRequest):
         req.frc_contracts,
         delta_cupom_bps=req.delta_cupom_bps,
         legs=legs,
+        scenario_key=req.scenario_key,
+        magnitude=req.magnitude,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -856,6 +890,11 @@ def chart_forward(req: ForwardChartRequest):
         delta_cupom_bps=req.delta_cupom_bps,
         delta_fx_pct=req.delta_fx_pct,
         legs=legs,
+        scenario_key=req.scenario_key,
+        magnitude=req.magnitude,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
 
@@ -871,8 +910,144 @@ def chart_real(req: RealChartRequest):
         req.dap_contracts,
         delta_ipca_bps=req.delta_ipca_bps,
         legs=legs,
+        scenario_key=req.scenario_key,
+        magnitude=req.magnitude,
+        custom_parallel_bps=req.custom_parallel_bps,
+        custom_slope_bps=req.custom_slope_bps,
+        custom_curvature_bps=req.custom_curvature_bps,
     )
     return json.loads(fig.to_json())
+
+
+# ---------------------------------------------------------------------------
+# 10b. POST /scenario-decomposition - decomposicao numerica por perna
+# ---------------------------------------------------------------------------
+
+@router.post("/scenario-decomposition")
+def scenario_decomposition(req: DecompositionRequest):
+    """Decomposicao por perna: taxa/PU antes-depois, P&L linear (DV01) vs real (TIR-shift),
+    diff de convexidade. Usado pelo painel detalhado da UI.
+
+    Para cada perna retorna:
+    - factor: 'Pre' | 'Selic' | 'Real (IPCA)' | 'Cupom Cambial' | 'FX (%)'
+    - delta_value, delta_unit ('bps' ou '%')
+    - rate_before, rate_after (% a.a.)
+    - pu_before, pu_after (R$)
+    - dv01 (R$ por bp, da posicao toda)
+    - pnl_linear: aproximacao 1a ordem -sign * DV01_total * delta_bps
+    - pnl_real: P&L exato pela diferenca de PUs (TIR-shift; inclui convexidade)
+    - pnl_convex_diff: pnl_real - pnl_linear (efeito 2a ordem)
+    """
+    legs = _rehydrate_legs(req.legs)
+    rate_legs = [l for l in legs if l.get("info") and l["info"].conv != "price"]
+    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
+    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+
+    rows: list[dict] = []
+    total_linear = 0.0
+    total_real = 0.0
+
+    for leg in legs:
+        info = leg.get("info") or INSTRUMENTS.get(leg.get("instrument"))
+        inst = leg["instrument"]
+        parsed_label = (
+            leg.get("parsed_label")
+            or (leg.get("parsed", {}).get("label") if isinstance(leg.get("parsed"), dict) else "")
+            or ""
+        )
+
+        if info.conv == "price":
+            # DOL: choque = delta_fx_pct
+            sign = 1 if leg["direction"] == "C" else -1
+            cot_before = leg["taxa"]
+            cot_after = cot_before * (1 + req.delta_fx_pct / 100.0)
+            pnl_real = sign * (cot_after - cot_before) * info.mult * leg["quantity"]
+            pnl_linear = pnl_real  # FX e linear (preco direto)
+            rows.append({
+                "instrument": inst,
+                "ticker": leg.get("ticker"),
+                "direction": leg["direction"],
+                "label": parsed_label,
+                "factor": "FX (%)",
+                "delta_value": round(req.delta_fx_pct, 4),
+                "delta_unit": "%",
+                "rate_before": round(cot_before, 4),
+                "rate_after": round(cot_after, 4),
+                "pu_before": round(cot_before, 4),
+                "pu_after": round(cot_after, 4),
+                "dv01": round(leg["dv01_total"], 2),
+                "pnl_linear": round(pnl_linear, 2),
+                "pnl_real": round(pnl_real, 2),
+                "pnl_convex_diff": 0.0,
+            })
+            total_linear += pnl_linear
+            total_real += pnl_real
+            continue
+
+        # Determina delta efetivo conforme tipo de instrumento
+        scenario_delta = calc_scenario_delta(
+            leg["du"], du_min, du_max, req.scenario_key, req.magnitude,
+            req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+        )
+        if inst in ("NTN-B", "DAP"):
+            delta_bps = scenario_delta + req.delta_ipca_bps
+            factor = "Real (IPCA)"
+        elif inst in ("DDI", "FRC"):
+            delta_bps = scenario_delta + req.delta_cupom_bps
+            factor = "Cupom Cambial"
+        elif inst == "LFT":
+            delta_bps = scenario_delta
+            factor = "Selic"
+        else:
+            delta_bps = scenario_delta
+            factor = "Pre"
+
+        tax_fin = leg["tax_fin"]
+        rate_before = tax_fin
+        rate_after = tax_fin + delta_bps / 100.0
+
+        liq = leg.get("liq")
+        venc = leg.get("parsed", {}).get("date") if isinstance(leg.get("parsed"), dict) else None
+        leg_vna = leg.get("vna")
+        pu_before = pu(inst, rate_before, leg["du"], leg["dc"], liq, venc, vna=leg_vna)
+        pu_after = pu(inst, rate_after, leg["du"], leg["dc"], liq, venc, vna=leg_vna)
+
+        if info.type == "tpf":
+            sign = 1 if leg["direction"] == "C" else -1
+        else:
+            sign = -1 if leg["direction"] == "C" else 1
+
+        pnl_real = sign * (pu_after - pu_before) * leg["quantity"]
+        # Linear de 1a ordem: dPU ≈ -DV01_unit * delta_bps
+        # → pnl ≈ sign * (-DV01_unit * delta_bps) * qty = -sign * DV01_total * delta_bps
+        pnl_linear = -sign * leg["dv01_total"] * delta_bps
+
+        rows.append({
+            "instrument": inst,
+            "ticker": leg.get("ticker"),
+            "direction": leg["direction"],
+            "label": parsed_label,
+            "factor": factor,
+            "delta_value": round(delta_bps, 4),
+            "delta_unit": "bps",
+            "rate_before": round(rate_before, 6),
+            "rate_after": round(rate_after, 6),
+            "pu_before": round(pu_before, 6),
+            "pu_after": round(pu_after, 6),
+            "dv01": round(leg["dv01_total"], 2),
+            "pnl_linear": round(pnl_linear, 2),
+            "pnl_real": round(pnl_real, 2),
+            "pnl_convex_diff": round(pnl_real - pnl_linear, 2),
+        })
+        total_linear += pnl_linear
+        total_real += pnl_real
+
+    return {
+        "legs": rows,
+        "total_pnl_linear": round(total_linear, 2),
+        "total_pnl_real": round(total_real, 2),
+        "total_convex_diff": round(total_real - total_linear, 2),
+    }
 
 
 # ---------------------------------------------------------------------------

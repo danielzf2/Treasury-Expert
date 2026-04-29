@@ -202,6 +202,130 @@ def test_chart_endpoint_returns_plotly_json(client, market_snap, chart, preset_n
 
 
 # ============================================================================
+# 4b. POST /sim/charts/{cupom,forward,real} aceitam scenario_key
+# ============================================================================
+
+@pytest.mark.parametrize("chart_url,preset_name,extra_payload", [
+    ("cupom", "DI1+FRC (dol sint.)",
+     {"frc_contracts_key": "frc"}),
+    ("forward", "DOL+DI1 (cupom sint.)",
+     {"frc_contracts_key": "frc", "di1_key": "di1"}),
+    ("real", "Casada NTN-B+DAP",
+     {"dap_contracts_key": "dap"}),
+])
+def test_chart_endpoint_responds_to_scenario(client, market_snap,
+                                              chart_url, preset_name, extra_payload):
+    """POST /sim/charts/{cupom|forward|real} produz output diferente quando muda scenario."""
+    proc = client.post("/sim/process", json={
+        "legs": PRESETS_INPUT[preset_name],
+        "data_neg": DATA_NEG_STR, "spot": SPOT,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }).json()
+
+    base_payload = {"legs": proc["legs"]}
+    if "frc_contracts_key" in extra_payload:
+        base_payload["frc_contracts" if chart_url == "cupom" else "frc"] = market_snap.frc
+    if "di1_key" in extra_payload:
+        base_payload["di1"] = market_snap.di1
+        base_payload["spot"] = SPOT
+    if "dap_contracts_key" in extra_payload:
+        base_payload["dap_contracts"] = market_snap.dap
+
+    p_zero = {**base_payload, "scenario_key": "bull_par", "magnitude": 0.0}
+    p_bull = {**base_payload, "scenario_key": "bull_par", "magnitude": 10.0}
+
+    r_zero = client.post(f"/sim/charts/{chart_url}", json=p_zero).json()
+    r_bull = client.post(f"/sim/charts/{chart_url}", json=p_bull).json()
+
+    # Ambos retornaram Plotly valido
+    assert "data" in r_zero and "data" in r_bull
+
+    # Ao menos um trace tem y diferente entre os dois
+    differs = False
+    for t0, t1 in zip(r_zero["data"], r_bull["data"]):
+        y0 = t0.get("y") or []
+        y1 = t1.get("y") or []
+        if y0 and y1 and any(abs(a - b) > 1e-9 for a, b in zip(y0, y1)):
+            differs = True
+            break
+    assert differs, f"chart {chart_url} nao responde a scenario_key"
+
+
+# ============================================================================
+# 4c. POST /sim/scenario-decomposition
+# ============================================================================
+
+@pytest.mark.parametrize("preset_name", PRESET_NAMES)
+def test_decomposition_endpoint_shape(client, market_snap, preset_name):
+    """POST /sim/scenario-decomposition retorna shape esperado por perna."""
+    proc = client.post("/sim/process", json={
+        "legs": PRESETS_INPUT[preset_name],
+        "data_neg": DATA_NEG_STR, "spot": SPOT,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }).json()
+
+    payload = {
+        "legs": proc["legs"],
+        "scenario_key": "bull_par", "magnitude": 10.0,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }
+    r = client.post("/sim/scenario-decomposition", json=payload)
+    assert r.status_code == 200, r.text
+    data = r.json()
+
+    assert "legs" in data
+    assert "total_pnl_linear" in data
+    assert "total_pnl_real" in data
+    assert "total_convex_diff" in data
+    assert len(data["legs"]) == len(proc["legs"])
+
+    expected_keys = {"instrument", "ticker", "direction", "label", "factor",
+                      "delta_value", "delta_unit", "rate_before", "rate_after",
+                      "pu_before", "pu_after", "dv01",
+                      "pnl_linear", "pnl_real", "pnl_convex_diff"}
+    for leg in data["legs"]:
+        assert expected_keys.issubset(leg.keys()), \
+            f"missing: {expected_keys - leg.keys()}"
+
+
+def test_decomposition_zero_magnitude_zero_pnl(client, market_snap):
+    """Magnitude 0 + sliders 0 -> P&L total zero."""
+    proc = client.post("/sim/process", json={
+        "legs": PRESETS_INPUT["Casada NTN-B+DAP"],
+        "data_neg": DATA_NEG_STR, "spot": SPOT,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }).json()
+
+    r = client.post("/sim/scenario-decomposition", json={
+        "legs": proc["legs"],
+        "scenario_key": "bull_par", "magnitude": 0.0,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }).json()
+
+    assert r["total_pnl_real"] == pytest.approx(0.0, abs=0.01)
+    assert r["total_pnl_linear"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_decomposition_pnl_matches_mtm_table(client, market_snap):
+    """P&L total da decomposicao bate com P&L total da mtm-table no mesmo cenario."""
+    proc = client.post("/sim/process", json={
+        "legs": PRESETS_INPUT["Casada LTN+DI1"],
+        "data_neg": DATA_NEG_STR, "spot": SPOT,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }).json()
+
+    payload = {
+        "legs": proc["legs"],
+        "scenario_key": "bull_par", "magnitude": 10.0,
+        "di1": market_snap.di1, "dap": market_snap.dap,
+    }
+    dec = client.post("/sim/scenario-decomposition", json=payload).json()
+    mtm = client.post("/sim/mtm-table", json=payload).json()
+
+    assert dec["total_pnl_real"] == pytest.approx(mtm["total_pnl"], abs=1.0)
+
+
+# ============================================================================
 # 5. GET /sim/tickers/{instrument}
 # ============================================================================
 

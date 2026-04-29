@@ -53,8 +53,8 @@ const state = {
     deltaFx: 0, deltaIpca: 0, deltaCupom: 0,
     expandFlows: false,
     activeTab: "sim",
-    activeChartTab: "curve",
     activeSimSubTab: "pernas",
+    decompositionMode: "minimal",
 };
 
 async function init() {
@@ -108,7 +108,9 @@ function switchSimSubTab(name) {
 }
 
 function resizeScenarioCharts() {
-    ["chartContainer","pnlBarsChart","pnlConsolidatedChart","pnlPerLegChart"].forEach(id => {
+    const ids = ["chartCurve", "chartCupom", "chartForward", "chartReal",
+                 "pnlBarsChart", "pnlConsolidatedChart", "pnlPerLegChart"];
+    ids.forEach(id => {
         const el = document.getElementById(id);
         if (el && el._fullLayout) Plotly.Plots.resize(id);
     });
@@ -756,16 +758,91 @@ function sliderHtml(label, key, val, min, max, step, hint) {
     </div>`;
 }
 
+function _scenarioBase() {
+    /* payload comum dos endpoints de chart e P&L. */
+    const r = state.results;
+    return {
+        legs: r ? r.legs : [],
+        scenario_key: state.scenarioKey,
+        magnitude: state.magnitude,
+        delta_fx_pct: state.deltaFx,
+        delta_ipca_bps: state.deltaIpca,
+        delta_cupom_bps: state.deltaCupom,
+        custom_parallel_bps: state.customParallel,
+        custom_slope_bps: state.customSlope,
+        custom_curvature_bps: state.customCurvature,
+    };
+}
+
+function _activeCharts(legs, strategy) {
+    /* Lista charts aplicaveis na ordem [{id,label,div,url,body}].
+       Regras:
+       - Curva Pre: so se tiver leg em LTN/NTN-F/LFT/DI1 (curva pre/CDI/Selic)
+       - Cupom Cambial: leg FRC/DDI ou cupom sintetico (DOL+DI1)
+       - Dolar Forward: leg DOL ou estrategia dol_sint/cupom_sint
+       - Taxa Real (DAP): leg NTN-B/DAP */
+    const hasPre = legs.some(l => ["LTN","NTN-F","LFT","DI1"].includes(l.instrument));
+    const hasCupom = legs.some(l=>["FRC","DDI"].includes(l.instrument)) ||
+                     (legs.some(l=>l.instrument==="DOL") && legs.some(l=>l.instrument==="DI1"));
+    const hasFwd = legs.some(l=>l.instrument==="DOL") ||
+                   ["dol_sint","cupom_sint"].includes(strategy?.type);
+    const hasIpca = legs.some(l=>["NTN-B","DAP"].includes(l.instrument));
+
+    const base = _scenarioBase();
+    const di1 = state.marketData?.di1 || [];
+    const dap = state.marketData?.dap || [];
+    const frc = state.marketData?.frc || [];
+    const spot = +document.getElementById("spotInput").value || 5;
+
+    const charts = [];
+    if (hasPre) charts.push(
+        {id:"curve", label:"Curva Pré", divId:"chartCurve",
+         url:"/sim/charts/curve", body:{...base, di1, dap}});
+    if (hasCupom) charts.push({id:"cupom", label:"Cupom Cambial (FRC)", divId:"chartCupom",
+         url:"/sim/charts/cupom",
+         body:{frc_contracts:frc, delta_cupom_bps:state.deltaCupom, legs:legs,
+               scenario_key:state.scenarioKey, magnitude:state.magnitude,
+               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
+               custom_curvature_bps:state.customCurvature}});
+    if (hasFwd) charts.push({id:"forward", label:"Dólar Forward", divId:"chartForward",
+         url:"/sim/charts/forward",
+         body:{di1, frc, spot, delta_pre_bps:0,
+               delta_cupom_bps:state.deltaCupom, delta_fx_pct:state.deltaFx,
+               legs:legs, scenario_key:state.scenarioKey, magnitude:state.magnitude,
+               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
+               custom_curvature_bps:state.customCurvature}});
+    if (hasIpca) charts.push({id:"real", label:"Taxa Real (DAP)", divId:"chartReal",
+         url:"/sim/charts/real",
+         body:{dap_contracts:dap, delta_ipca_bps:state.deltaIpca, legs:legs,
+               scenario_key:state.scenarioKey, magnitude:state.magnitude,
+               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
+               custom_curvature_bps:state.customCurvature}});
+
+    return charts;
+}
+
+function renderChartsGrid() {
+    /* Cria divs vazios pros mini-charts conforme as legs aplicaveis. */
+    if (!state.results) return;
+    const charts = _activeCharts(state.results.legs, state.results.strategy);
+    const grid = document.getElementById("chartsGrid");
+    if (!grid) return;
+
+    grid.classList.remove("grid-1col", "grid-2col", "grid-2x2");
+    grid.classList.add(charts.length === 1 ? "grid-1col" :
+                       charts.length === 2 ? "grid-2col" : "grid-2x2");
+
+    grid.innerHTML = charts.map(c =>
+        `<div><div class="mini-chart-title">${c.label}</div><div id="${c.divId}" style="min-height:280px"></div></div>`
+    ).join("");
+}
+
 async function loadCharts() {
     if (!state.results) return;
     const r = state.results;
-    const di1 = state.marketData?.di1 || [];
-    const dap = state.marketData?.dap || [];
-    const base = {legs: r.legs, scenario_key: state.scenarioKey, magnitude: state.magnitude,
-        delta_fx_pct: state.deltaFx, delta_ipca_bps: state.deltaIpca, delta_cupom_bps: state.deltaCupom,
-        custom_parallel_bps: state.customParallel, custom_slope_bps: state.customSlope,
-        custom_curvature_bps: state.customCurvature,
-        di1: di1, dap: dap};
+    const base = _scenarioBase();
+    base.di1 = state.marketData?.di1 || [];
+    base.dap = state.marketData?.dap || [];
 
     const plotCfg = {displayModeBar:false, responsive:true};
 
@@ -774,7 +851,7 @@ async function loadCharts() {
             const resp = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
             if (!resp.ok) { console.error(url, resp.status, await resp.text()); return null; }
             const fig = await resp.json();
-            if (fig.data && divId) {
+            if (fig.data && divId && document.getElementById(divId)) {
                 await Plotly.newPlot(divId, fig.data, fig.layout, plotCfg);
                 requestAnimationFrame(() => Plotly.Plots.resize(divId));
             }
@@ -782,13 +859,23 @@ async function loadCharts() {
         } catch(e) { console.error(url, e); return null; }
     }
 
-    const [curve, pnl, cons, perLeg, mtm] = await Promise.all([
-        safeChart("/sim/charts/curve", base, "chartContainer"),
+    // Refaz o grid (legs/strategy podem ter mudado)
+    renderChartsGrid();
+
+    // Charts cenarios em paralelo
+    const charts = _activeCharts(r.legs, r.strategy);
+    const chartPromises = charts.map(c => safeChart(c.url, c.body, c.divId));
+
+    // P&L charts e MtM table em paralelo
+    const [pnl, cons, perLeg, mtm, dec] = await Promise.all([
         safeChart("/sim/charts/pnl-bars", base, "pnlBarsChart"),
         safeChart("/sim/charts/pnl-consolidated", base, "pnlConsolidatedChart"),
         safeChart("/sim/charts/pnl-per-leg", {...base, expand_flows: !!state.expandFlows}, "pnlPerLegChart"),
         safeChart("/sim/mtm-table", base, null),
+        safeChart("/sim/scenario-decomposition", base, null),
     ]);
+
+    await Promise.all(chartPromises);
 
     if (mtm && mtm.total_pnl !== undefined) {
         document.getElementById("pnlTotal").innerHTML =
@@ -800,8 +887,8 @@ async function loadCharts() {
     if (mtm && mtm.table) renderMtmTable(mtm.table, r.legs);
     if (mtm && mtm.flow_pnl) renderCashflows(r, mtm.flow_pnl);
 
+    if (dec) renderDecomposition(dec);
     renderPnlPerLegToggle();
-    renderChartTabs();
 }
 
 function renderPnlPerLegToggle() {
@@ -817,40 +904,91 @@ function renderPnlPerLegToggle() {
     </label>`;
 }
 
-function renderChartTabs() {
-    if (!state.results) return;
-    const r = state.results;
-    const hasCupom = r.legs.some(l=>["FRC","DDI"].includes(l.instrument)) || (r.legs.some(l=>l.instrument==="DOL")&&r.legs.some(l=>l.instrument==="DI1"));
-    const hasFwd = r.legs.some(l=>l.instrument==="DOL") || ["dol_sint","cupom_sint"].includes(r.strategy.type);
-    const hasIpca = r.legs.some(l=>["NTN-B","DAP"].includes(l.instrument));
-
-    const tabs = [{id:"curve", label:"Curva Pré"}];
-    if (hasCupom) tabs.push({id:"cupom", label:"Cupom Cambial"});
-    if (hasFwd) tabs.push({id:"forward", label:"Dólar Forward"});
-    if (hasIpca) tabs.push({id:"real", label:"Taxa Real"});
-
-    if (tabs.length <= 1) { document.getElementById("chartTabs").innerHTML = ""; return; }
-    document.getElementById("chartTabs").innerHTML = tabs.map(t =>
-        `<button class="${t.id===state.activeChartTab?"active":""}" onclick="switchChartTab('${t.id}')">${t.label}</button>`
-    ).join("");
+function _fmtBRL(v, dec) {
+    dec = dec === undefined ? 2 : dec;
+    if (v === null || v === undefined || isNaN(v)) return "--";
+    const s = Math.abs(v).toLocaleString("pt-BR", {minimumFractionDigits:dec, maximumFractionDigits:dec});
+    return (v < 0 ? "-" : "") + "R$ " + s;
 }
 
-async function switchChartTab(tab) {
-    state.activeChartTab = tab;
-    renderChartTabs();
-    const r = state.results;
-    const base = {legs:r.legs, scenario_key:state.scenarioKey, magnitude:state.magnitude,
-        delta_fx_pct:state.deltaFx, delta_ipca_bps:state.deltaIpca, delta_cupom_bps:state.deltaCupom,
-        custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
-        custom_curvature_bps:state.customCurvature};
-    let url, body;
-    if (tab === "curve") { url="/sim/charts/curve"; body={...base, di1:state.marketData?.di1||[], dap:state.marketData?.dap||[]}; }
-    else if (tab === "cupom") { url="/sim/charts/cupom"; body={frc_contracts:state.marketData?.frc||[], delta_cupom_bps:state.deltaCupom, legs:r.legs}; }
-    else if (tab === "forward") { url="/sim/charts/forward"; body={di1:state.marketData?.di1||[], frc:state.marketData?.frc||[], spot:+document.getElementById("spotInput").value, ...base}; }
-    else if (tab === "real") { url="/sim/charts/real"; body={dap_contracts:state.marketData?.dap||[], delta_ipca_bps:state.deltaIpca, legs:r.legs}; }
-    const resp = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
-    const fig = await resp.json();
-    if (fig.data) Plotly.newPlot("chartContainer", fig.data, fig.layout, {displayModeBar:false, responsive:true});
+function _pnlClass(v) { return v >= 0 ? "pnl-pos" : "pnl-neg"; }
+
+function _dirLabel(d) { return d === "C" ? "C" : "V"; }
+
+function renderDecomposition(dec) {
+    /* Painel de decomposicao numerica abaixo dos charts.
+       state.decompositionMode = 'minimal' | 'rich' */
+    const el = document.getElementById("decompositionPanel");
+    if (!el || !dec) return;
+
+    const mode = state.decompositionMode || "minimal";
+    const headerHtml = `
+        <div class="decomposition-head">
+            <h3>Decomposição por perna <span class="muted" style="font-weight:400;font-size:11px">— efeito do cenario + sliders aplicado a cada fator</span></h3>
+            <div style="display:flex;gap:6px">
+                <button class="btn-toggle ${mode==='minimal'?'active':''}" onclick="state.decompositionMode='minimal';renderDecomposition(window._lastDecomposition)">Minimal</button>
+                <button class="btn-toggle ${mode==='rich'?'active':''}" onclick="state.decompositionMode='rich';renderDecomposition(window._lastDecomposition)">Detalhar</button>
+            </div>
+        </div>`;
+
+    let body;
+    if (mode === "rich") {
+        const rows = dec.legs.map(l => {
+            const isPct = l.delta_unit === "%";
+            const rateFmt = isPct
+                ? `${l.rate_before.toFixed(4)} → ${l.rate_after.toFixed(4)}`
+                : `${l.rate_before.toFixed(4)}% → ${l.rate_after.toFixed(4)}%`;
+            const puFmt = `${l.pu_before.toLocaleString("pt-BR",{maximumFractionDigits:4})} → ${l.pu_after.toLocaleString("pt-BR",{maximumFractionDigits:4})}`;
+            const deltaFmt = `${l.delta_value >= 0 ? "+" : ""}${l.delta_value.toFixed(2)} ${l.delta_unit}`;
+            return `<tr>
+                <td><span class="leg-tag">${_dirLabel(l.direction)} ${l.instrument} ${l.label}</span></td>
+                <td>${l.factor}</td>
+                <td class="tr">${deltaFmt}</td>
+                <td class="tr">${rateFmt}</td>
+                <td class="tr">${puFmt}</td>
+                <td class="tr">${l.dv01.toLocaleString("pt-BR",{maximumFractionDigits:0})}</td>
+                <td class="tr ${_pnlClass(l.pnl_linear)}">${_fmtBRL(l.pnl_linear,2)}</td>
+                <td class="tr ${_pnlClass(l.pnl_real)}">${_fmtBRL(l.pnl_real,2)}</td>
+                <td class="tr ${_pnlClass(l.pnl_convex_diff)}">${_fmtBRL(l.pnl_convex_diff,2)}</td>
+            </tr>`;
+        }).join("");
+        body = `<table class="dec-rich-table">
+            <thead><tr>
+                <th>Perna</th><th>Fator</th><th class="tr">Choque</th>
+                <th class="tr">Taxa antes → depois</th><th class="tr">PU antes → depois</th>
+                <th class="tr">DV01</th><th class="tr">P&L linear</th>
+                <th class="tr">P&L real</th><th class="tr">Convex (Δ)</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+            <tfoot><tr class="totals">
+                <td colspan="6" class="tr">TOTAL</td>
+                <td class="tr ${_pnlClass(dec.total_pnl_linear)}">${_fmtBRL(dec.total_pnl_linear,2)}</td>
+                <td class="tr ${_pnlClass(dec.total_pnl_real)}">${_fmtBRL(dec.total_pnl_real,2)}</td>
+                <td class="tr ${_pnlClass(dec.total_convex_diff)}">${_fmtBRL(dec.total_convex_diff,2)}</td>
+            </tr></tfoot>
+        </table>`;
+    } else {
+        // minimal: 1 linha por perna
+        const rows = dec.legs.map(l => {
+            const isPct = l.delta_unit === "%";
+            const deltaStr = `${l.delta_value >= 0 ? "+" : ""}${l.delta_value.toFixed(2)}${l.delta_unit === "bps" ? " bps" : "%"}`;
+            const rateStr = isPct
+                ? `${l.rate_before.toFixed(2)} → ${l.rate_after.toFixed(2)}`
+                : `${l.rate_before.toFixed(2)}% → ${l.rate_after.toFixed(2)}%`;
+            return `<div class="dec-min-row">
+                <span class="leg-tag">${_dirLabel(l.direction)} ${l.instrument} ${l.label}</span>:
+                ${l.factor} ${deltaStr} · ${rateStr} · DV01 R$ ${l.dv01.toLocaleString("pt-BR",{maximumFractionDigits:0})} ·
+                <span class="${_pnlClass(l.pnl_real)}">P&L ${_fmtBRL(l.pnl_real,0)}</span>
+            </div>`;
+        }).join("");
+        body = rows + `<div class="dec-min-row" style="margin-top:6px;font-weight:600;color:#e6edf3">
+            TOTAL P&L: <span class="${_pnlClass(dec.total_pnl_real)}">${_fmtBRL(dec.total_pnl_real,0)}</span>
+            <span class="muted" style="font-weight:400;font-size:11px">(linear ${_fmtBRL(dec.total_pnl_linear,0)} + convex ${_fmtBRL(dec.total_convex_diff,0)})</span>
+        </div>`;
+    }
+
+    el.innerHTML = headerHtml + body;
+    window._lastDecomposition = dec;
 }
 
 function renderMtmTable(table, legs) {

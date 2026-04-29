@@ -465,7 +465,7 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     vertical-align: middle;
 }
 
-/* Charts area */
+/* Charts area (legado, ainda usado em outras secoes) */
 .chart-area {
     display: grid;
     grid-template-columns: 3fr 1fr;
@@ -477,6 +477,108 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     width: 100%;
     min-width: 0;
     overflow: hidden;
+}
+
+/* Cenarios — grid adaptativo de mini-charts + sliders na lateral */
+.scenario-grid {
+    display: grid;
+    grid-template-columns: 3fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+.scenario-grid > div { min-width: 0; }
+.charts-grid {
+    display: grid;
+    gap: 12px;
+}
+.charts-grid.grid-1col { grid-template-columns: 1fr; }
+.charts-grid.grid-2col { grid-template-columns: 1fr 1fr; }
+.charts-grid.grid-2x2  { grid-template-columns: 1fr 1fr; }
+.charts-grid > div { min-width: 0; overflow: hidden; }
+.mini-chart-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #c9d1d9;
+    margin: 0 0 4px 4px;
+}
+@media (max-width: 1024px) {
+    .charts-grid.grid-2col, .charts-grid.grid-2x2 { grid-template-columns: 1fr; }
+    .scenario-grid { grid-template-columns: 1fr; }
+}
+
+/* Decomposicao numerica abaixo dos charts */
+.decomposition-panel {
+    margin-top: 4px;
+    margin-bottom: 16px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+.decomposition-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.decomposition-head h3 {
+    font-size: 13px;
+    margin: 0;
+    color: #e6edf3;
+}
+.btn-toggle {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.btn-toggle.active {
+    border-color: #58a6ff;
+    color: #58a6ff;
+}
+.dec-min-row {
+    font-size: 12px;
+    color: #c9d1d9;
+    padding: 3px 0;
+    border-bottom: 1px dashed rgba(100,100,100,0.15);
+    font-feature-settings: "tnum" 1;
+    font-variant-numeric: tabular-nums;
+}
+.dec-min-row:last-child { border-bottom: none; }
+.dec-min-row .leg-tag { color: #58a6ff; font-weight: 600; }
+.dec-min-row .pnl-pos { color: #3fb950; }
+.dec-min-row .pnl-neg { color: #f85149; }
+
+.dec-rich-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11.5px;
+    font-feature-settings: "tnum" 1;
+    font-variant-numeric: tabular-nums;
+}
+.dec-rich-table th {
+    text-align: left;
+    color: #8b949e;
+    font-weight: 500;
+    border-bottom: 1px solid #30363d;
+    padding: 6px 8px;
+    white-space: nowrap;
+}
+.dec-rich-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid rgba(100,100,100,0.1);
+    color: #c9d1d9;
+}
+.dec-rich-table .tr { text-align: right; }
+.dec-rich-table tr.totals td {
+    font-weight: 600;
+    color: #e6edf3;
+    border-top: 1px solid #30363d;
+    border-bottom: none;
 }
 .chart-tabs {
     display: flex;
