@@ -10,6 +10,12 @@ const SCENARIOS = {
     custom:"Custom"
 };
 
+function brDate() {
+    const now = new Date();
+    const br = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+    return br.toISOString().slice(0, 10);
+}
+
 const state = {
     legs: [],
     presets: {},
@@ -23,6 +29,7 @@ const state = {
 };
 
 async function init() {
+    document.getElementById("dataNeg").value = brDate();
     const resp = await fetch("/sim/presets");
     state.presets = await resp.json();
     renderPresets();
