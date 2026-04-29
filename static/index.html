@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Simulador de Títulos Públicos Federais e Derivativos — LTN, NTN-F, NTN-B, LFT, DI1, DAP, DOL, DDI, FRC">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="color-scheme" content="dark">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <title>Treasury Expert — Simulador TPF + Derivativos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Simulador TPF + Derivativos</h1>
+            <p class="subtitle">TPF (LTN, NTN-F, NTN-B, LFT) + Derivativos (DI1, DAP, DOL, DDI, FRC)</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Config row -->
+        <div class="config-row">
+            <div>
+                <label>Data Negociação</label>
+                <input type="date" id="dataNeg" value="2026-04-29">
+            </div>
+            <div>
+                <label>Spot USD (R$/USD)</label>
+                <input type="number" id="spotInput" value="4.9724" step="0.0001" min="0">
+            </div>
+            <button class="btn-primary" id="btnFetchMarket" onclick="fetchMarketData()">Atualizar Dados de Mercado</button>
+            <div id="mktTimestamp" class="muted" style="font-size:11px; align-self:center"></div>
+        </div>
+
+        <!-- Market indicators -->
+        <div class="mkt-indicators" id="mktIndicators" style="display:none"></div>
+
+        <!-- Tabs -->
+        <div class="tabs" role="tablist">
+            <button class="active" role="tab" aria-selected="true" onclick="switchTab('sim')">Simulador</button>
+            <button role="tab" aria-selected="false" onclick="switchTab('mkt')">Dados de Mercado</button>
+            <button role="tab" aria-selected="false" onclick="switchTab('formulas')">Fórmulas</button>
+        </div>
+
+        <!-- Tab: Simulador -->
+        <div id="tab-sim" role="tabpanel">
+            <!-- Presets -->
+            <div class="presets" id="presets"></div>
+
+            <!-- Leg inputs -->
+            <div class="sec-h">Pernas da Operação</div>
+            <div id="legsHeader" class="leg-row" style="margin-bottom:4px"></div>
+            <div id="legsContainer" class="legs-container"></div>
+            <button class="btn-add" onclick="addLeg()">+ Adicionar Perna</button>
+
+            <hr class="divider">
+
+            <!-- Results -->
+            <div id="metricsArea"></div>
+
+            <div class="sec-h">Ativo vs Passivo</div>
+            <div id="avTable"></div>
+
+            <div id="riskFactors"></div>
+
+            <hr class="divider">
+
+            <div class="sec-h">Detalhes das Pernas</div>
+            <div id="detailsTable" class="details-wrap"></div>
+
+            <!-- Spread & Costs (casada only) -->
+            <div id="spreadCosts"></div>
+
+            <!-- KRD & Hedge -->
+            <div id="krdSection"></div>
+
+            <hr class="divider">
+
+            <!-- Scenarios -->
+            <div class="sec-h">Cenários de Curva de Juros</div>
+            <div class="scenario-radio" id="scenarioRadio"></div>
+            <div id="scenarioDesc" class="muted" style="font-size:12px; margin-bottom:8px"></div>
+
+            <div class="chart-area">
+                <div>
+                    <div class="chart-tabs" id="chartTabs"></div>
+                    <div id="chartContainer" style="min-height:400px"></div>
+                </div>
+                <div class="sliders-panel" id="slidersPanel"></div>
+            </div>
+
+            <div id="pnlBarsChart"></div>
+            <div id="pnlTotal" class="metrics" style="grid-template-columns:1fr"></div>
+
+            <hr class="divider">
+
+            <div id="mtmTable"></div>
+
+            <hr class="divider">
+
+            <div class="two-col">
+                <div id="pnlConsolidatedChart"></div>
+                <div id="pnlPerLegChart"></div>
+            </div>
+        </div>
+
+        <!-- Tab: Dados de Mercado -->
+        <div id="tab-mkt" role="tabpanel" style="display:none">
+            <div id="mktDataContent">
+                <p class="muted">Clique em "Atualizar Dados de Mercado" para carregar.</p>
+            </div>
+        </div>
+
+        <!-- Tab: Fórmulas -->
+        <div id="tab-formulas" role="tabpanel" style="display:none">
+            <div id="formulasContent"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
