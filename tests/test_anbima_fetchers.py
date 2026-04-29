@@ -407,6 +407,42 @@ class TestEndpoints:
         assert data["data_ref"] == "2026-04-28"
         assert len(data["records"]) == 5
 
+    def test_tickers_tpf_uses_anbima_when_available(self, api_client_with_mock):
+        """GET /sim/tickers/LFT retorna lista do ANBIMA (sample tem 1 LFT: U26)."""
+        r = api_client_with_mock.get("/sim/tickers/LFT")
+        assert r.status_code == 200
+        data = r.json()
+        # Sample so tem LFT venc 2026-09-01 = U26
+        assert "U26" in data["tickers"]
+
+    def test_tickers_tpf_ltn_from_anbima(self, api_client_with_mock):
+        """LTN tickers vem do ANBIMA (sample tem 2 LTNs: 2026-07-01 + 2032-01-01 = N26, F32)."""
+        r = api_client_with_mock.get("/sim/tickers/LTN")
+        assert r.status_code == 200
+        data = r.json()
+        assert "N26" in data["tickers"]
+        assert "F32" in data["tickers"]
+
+    def test_tickers_tpf_falls_back_when_anbima_offline(self, monkeypatch, market_snap):
+        """Sem feed ANBIMA, tickers TPF caem no hardcoded TPF_VENCIMENTOS."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from api.simulator import router
+
+        af.clear_cache()
+        monkeypatch.setattr(af, "_http_get", lambda *a, **k: None)
+
+        app = FastAPI()
+        app.include_router(router, prefix="/sim")
+        c = TestClient(app)
+
+        r = c.get("/sim/tickers/LFT")
+        assert r.status_code == 200
+        # hardcoded em lib/market_data tem 7 LFT vencimentos
+        tickers = r.json()["tickers"]
+        assert len(tickers) >= 1
+        assert any(t.startswith("U") or t.startswith("H") for t in tickers)
+
     def test_get_anbima_tpf_filter_by_instrument(self, api_client_with_mock):
         r = api_client_with_mock.get("/sim/anbima-tpf?instrument=NTN-B")
         assert r.status_code == 200

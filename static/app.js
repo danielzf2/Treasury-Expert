@@ -209,9 +209,15 @@ async function populateTickerSelect(i, instrument, currentTicker) {
 
 async function changeInstrument(i, inst) {
     state.legs[i].instrument = inst;
-    if (inst === "NTN-B" && !state.legs[i].vna) state.legs[i].vna = 4500.0;
+    if (inst === "NTN-B") {
+        const vnaFromFeed = state.vnaData?.vna_ntnb;
+        if (!state.legs[i].vna || state.legs[i].vna === 4500.0) {
+            state.legs[i].vna = vnaFromFeed && vnaFromFeed > 0 ? vnaFromFeed : 4500.0;
+        }
+    }
     const tickers = await fetchTickers(inst);
     if (tickers.length) state.legs[i].ticker = tickers[0];
+    _autoFillRate(state.legs[i]);
     renderLegs();
     processLegs();
 }
@@ -229,7 +235,16 @@ function updateLeg(i, field, val) {
             }
         }
     }
+    if (field === "ticker") _autoFillRate(leg);
     processLegs();
+}
+
+function _autoFillRate(leg) {
+    /* Puxa taxa de mercado quando trocamos instrumento/ticker.
+       Para TPF: usa ANBIMA tx_indicativa; para derivativos: B3 last/ajuste. */
+    if (!state.marketData) return;
+    const r = findMarketRate(leg.instrument, leg.ticker, state.marketData);
+    if (r !== null && r > 0) leg.taxa = r;
 }
 
 function addLeg() {
@@ -326,12 +341,48 @@ function updateLegsFromMarket() {
 
 function findMarketRate(inst, ticker, m) {
     ticker = ticker.toUpperCase().trim();
+
+    // Derivativos: vem do feed B3 (cotacao.b3.com.br)
     const sources = {DI1: m.di1, DOL: m.dol, FRC: m.frc, DAP: m.dap, DDI: m.ddi};
     if (sources[inst]) {
         const c = sources[inst].find(c => c.symb === inst + ticker);
         if (c) return c.last > 0 ? c.last : c.ajuste;
     }
+
+    // TPF: vem do feed ANBIMA (PU oficial + tx indicativa D-1)
+    const tpfFeed = state.anbimaTpfData?.records || [];
+    if (["LTN", "NTN-F", "NTN-B", "LFT"].includes(inst) && tpfFeed.length) {
+        const targetVcto = inst === "NTN-B" ? tickerToDateNTNB(ticker) : tickerToDateStr(ticker);
+        if (targetVcto) {
+            const r = tpfFeed.find(x => x.instrument === inst && x.data_vencimento === targetVcto);
+            if (r && r.tx_indicativa) return r.tx_indicativa;
+        }
+    }
+
     return null;
+}
+
+const _TICKER_TO_MONTH = {F:1,G:2,H:3,J:4,K:5,M:6,N:7,Q:8,U:9,V:10,X:11,Z:12};
+
+function tickerToDateStr(ticker) {
+    // 'F32' -> '2032-01-01' (LTN/NTN-F/LFT) ou '2032-01-15' (NTN-B)
+    // Aproximacao: usamos dia 1 - matching exato exige instrumento, mas
+    // o ANBIMA TPF feed ja tras a data exata; aqui so precisamos do mes/ano.
+    const m = ticker.toUpperCase().match(/^([FGHJKMNQUVXZ])(\d{2})$/);
+    if (!m) return null;
+    const month = _TICKER_TO_MONTH[m[1]];
+    const yr = 2000 + parseInt(m[2]);
+    // Tenta dia 1 primeiro (LTN/NTN-F/LFT); se nao bater, callsite tenta dia 15
+    return `${yr}-${String(month).padStart(2,"0")}-01`;
+}
+
+function tickerToDateNTNB(ticker) {
+    // Variante para NTN-B (sempre dia 15)
+    const m = ticker.toUpperCase().match(/^([FGHJKMNQUVXZ])(\d{2})$/);
+    if (!m) return null;
+    const month = _TICKER_TO_MONTH[m[1]];
+    const yr = 2000 + parseInt(m[2]);
+    return `${yr}-${String(month).padStart(2,"0")}-15`;
 }
 
 async function processLegs() {

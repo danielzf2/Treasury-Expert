@@ -149,6 +149,13 @@ def _date_to_ticker(date_str: str) -> str:
 
 
 def _available_tickers(instrument: str, snap: MarketSnapshot) -> list[str]:
+    """Lista de tickers disponiveis para um instrumento.
+
+    Para derivativos (DI1/DOL/FRC/DAP/DDI): vem do snap B3 (cotacao.b3.com.br).
+    Para TPF (LTN/NTN-F/NTN-B/LFT): preferir feed ANBIMA TPF (TXT) para ter
+    a lista atualizada do mercado secundario; fallback para hardcoded em
+    lib/market_data.TPF_VENCIMENTOS quando feed indisponivel.
+    """
     _src = {
         "DI1": snap.di1, "DOL": snap.dol, "FRC": snap.frc,
         "DAP": snap.dap, "DDI": snap.ddi,
@@ -156,6 +163,9 @@ def _available_tickers(instrument: str, snap: MarketSnapshot) -> list[str]:
     if instrument in _src:
         return [c["symb"][3:] for c in _src[instrument] if len(c["symb"]) > 3]
     if instrument in ("LTN", "NTN-F", "NTN-B", "LFT"):
+        anbima_vctos = anbima_fetchers.get_anbima_tpf_vencimentos(instrument)
+        if anbima_vctos:
+            return [_date_to_ticker(d) for d in anbima_vctos]
         return [_date_to_ticker(d) for d in get_tpf_vctos(instrument)]
     return []
 
