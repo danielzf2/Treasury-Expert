@@ -374,6 +374,7 @@ class RealChartRequest(BaseModel):
 class MtmTableRequest(BaseModel):
     legs: list[dict]
     scenario_key: str
+    magnitude: float = 10.0
     delta_fx_pct: float = 0.0
     delta_ipca_bps: float = 0.0
     delta_cupom_bps: float = 0.0
