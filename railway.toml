@@ -1,2 +1,2 @@
 [deploy]
-startCommand = "python server/app.py"
+startCommand = "./start.sh"

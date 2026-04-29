@@ -6,7 +6,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server/ server/
 COPY docs/ docs/
-COPY web/dist/ web/dist/
+COPY casada-tool/ casada-tool/
+COPY proxy.py .
+COPY start.sh .
+RUN chmod +x start.sh
 
 ENV TRANSPORT=http
 ENV HOST=0.0.0.0
@@ -16,4 +19,4 @@ ENV FASTMCP_STATELESS_HTTP=true
 
 EXPOSE 8000
 
-CMD ["python", "server/app.py"]
+CMD ["./start.sh"]
