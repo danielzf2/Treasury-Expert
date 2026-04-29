@@ -13,8 +13,8 @@ import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import StreamingResponse, Response
-from starlette.routing import Route, Mount
+from starlette.responses import Response
+from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
 logging.basicConfig(level=logging.INFO)
@@ -117,28 +117,16 @@ async def _proxy_ws(websocket: WebSocket) -> None:
 
 app = Starlette(
     routes=[
+        WebSocketRoute("/_stm/{path:path}", _proxy_ws),
+        WebSocketRoute("/_stm", _proxy_ws),
+        WebSocketRoute("/stream", _proxy_ws),
         Route("/{path:path}", _proxy_http, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
         Route("/", _proxy_http, methods=["GET", "POST"]),
     ],
 )
 
 
-@app.websocket_route("/_stm/{path:path}")
-async def ws_stm(websocket: WebSocket):
-    await _proxy_ws(websocket)
-
-
-@app.websocket_route("/_stm")
-async def ws_stm_root(websocket: WebSocket):
-    await _proxy_ws(websocket)
-
-
-@app.websocket_route("/stream")
-async def ws_stream(websocket: WebSocket):
-    await _proxy_ws(websocket)
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8080"))
-    log.info("Proxy listening on :%d → MCP(%s) + Streamlit(%s)", port, MCP_UPSTREAM, STL_UPSTREAM)
+    log.info("Proxy listening on :%d -> MCP(%s) + Streamlit(%s)", port, MCP_UPSTREAM, STL_UPSTREAM)
     uvicorn.run(app, host="0.0.0.0", port=port)
