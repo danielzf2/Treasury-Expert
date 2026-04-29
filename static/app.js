@@ -58,8 +58,8 @@ async function init() {
     const resp = await fetch("/sim/presets");
     state.presets = await resp.json();
     renderPresets();
+    await fetchMarketData();
     applyPreset(Object.keys(state.presets)[0]);
-    fetchMarketData();
 }
 
 function renderPresets() {
@@ -324,8 +324,12 @@ function renderMetrics(r) {
 
 function renderAvTable(r) {
     const el = document.getElementById("avTable");
+    const autoLegs = r.legs.filter(l => l.auto);
+    const userLegs = r.legs.filter(l => !l.auto);
+    const aggregateAuto = autoLegs.length >= 3;
+
     let html = '<div class="av-wrap"><table class="sim-tbl"><tr><th></th><th>Instrumento</th><th class="tc">Ativo</th><th class="tc">Passivo</th><th class="tc">Vcto</th></tr>';
-    r.legs.forEach(l => {
+    userLegs.forEach(l => {
         const isBuy = l.direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
         const dirColor = isBuy ? "#3fb950" : "#f85149";
@@ -333,6 +337,27 @@ function renderAvTable(r) {
             <td class="bold">${l.instrument}</td><td class="tc mono">${l.exp_ativo}</td>
             <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
     });
+    if (aggregateAuto) {
+        const isBuy = autoLegs[0].direction === "C";
+        const dirLabel = isBuy ? "Compra" : "Venda";
+        const dirColor = isBuy ? "#3fb950" : "#f85149";
+        const hedgeInst = autoLegs[0].instrument;
+        const minVcto = autoLegs[0].parsed_label;
+        const maxVcto = autoLegs[autoLegs.length-1].parsed_label;
+        html += `<tr style="opacity:0.75"><td><span class="auto-badge">AUTO</span> <span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
+            <td class="bold">${hedgeInst} Hedge × ${autoLegs.length}</td>
+            <td class="tc mono muted" colspan="2">strip de ${minVcto} a ${maxVcto}</td>
+            <td class="tc mono muted">${autoLegs.length} vértices</td></tr>`;
+    } else {
+        autoLegs.forEach(l => {
+            const isBuy = l.direction === "C";
+            const dirLabel = isBuy ? "Compra" : "Venda";
+            const dirColor = isBuy ? "#3fb950" : "#f85149";
+            html += `<tr style="opacity:0.7"><td><span class="auto-badge">AUTO</span> <span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
+                <td class="bold">${l.instrument}</td><td class="tc mono">${l.exp_ativo}</td>
+                <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
+        });
+    }
     html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr></table></div>`;
     el.innerHTML = html;
 }
@@ -356,8 +381,10 @@ function renderDetails(r) {
     let html = '<table class="sim-tbl"><tr>' + cols.map(c=>`<th>${c}</th>`).join("") + "</tr>";
     r.legs.forEach(l => {
         const isP = l.info_conv === "price";
-        html += `<tr>
-            <td>${l.instrument}</td><td>${l.direction==="C"?"Compra":"Venda"}</td><td>${l.side}</td>
+        const rowCls = l.auto ? ' style="opacity:0.65"' : '';
+        const autoMark = l.auto ? '<span class="auto-badge" style="margin-right:4px">A</span>' : '';
+        html += `<tr${rowCls}>
+            <td>${autoMark}${l.instrument}</td><td>${l.direction==="C"?"Compra":"Venda"}</td><td>${l.side}</td>
             <td>${l.parsed_full}</td><td>${l.liq}</td><td>${l.du}</td><td>${l.dc}</td>
             <td class="mono">${isP?l.taxa.toFixed(1):l.taxa.toFixed(4)+"%"}</td>
             <td class="mono">${isP?l.tax_fin.toFixed(1):l.tax_fin.toFixed(4)+"%"}</td>
@@ -375,15 +402,20 @@ function renderSpreadCosts(r) {
     const el = document.getElementById("spreadCosts");
     if (r.strategy.type !== "casada") { el.innerHTML = ""; return; }
     const allin = r.strategy.spread - r.total_corr_bps;
+    const visibleLegs = r.legs.filter(l => l.info_conv !== "price" && (l.corr_brl > 0 || !l.auto));
     let html = '<hr class="divider"><div class="two-col"><div><div class="sec-h">Spread All-in</div><table class="sim-tbl"><tr><th>Item</th><th class="tr">Valor</th></tr>';
     html += `<tr><td>Spread bruto</td><td class="tr">${r.strategy.spread.toFixed(2)} bps</td></tr>`;
-    r.legs.filter(l=>l.info_conv!=="price").forEach(l => {
-        html += `<tr><td>Corretagem ${l.instrument}</td><td class="tr">-${l.corr_bps.toFixed(2)} bps</td></tr>`;
+    visibleLegs.forEach(l => {
+        if (l.corr_bps > 0.001) {
+            html += `<tr><td>Corretagem ${l.instrument}${l.auto?" (auto)":""}</td><td class="tr">-${l.corr_bps.toFixed(2)} bps</td></tr>`;
+        }
     });
     html += `<tr><td class="bold">Spread all-in</td><td class="tr bold">${allin.toFixed(2)} bps</td></tr></table></div>`;
     html += '<div><div class="sec-h">Custos</div><table class="sim-tbl"><tr><th>Item</th><th class="tr">R$</th><th class="tr">bps</th></tr>';
-    r.legs.forEach(l => {
-        html += `<tr><td>Corretagem ${l.instrument} (${l.parsed_label})</td><td class="tr">${l.corr_brl.toFixed(2)}</td><td class="tr">-${l.corr_bps.toFixed(2)}</td></tr>`;
+    visibleLegs.forEach(l => {
+        if (l.corr_brl > 0.01) {
+            html += `<tr><td>Corretagem ${l.instrument}${l.auto?" (auto)":""} (${l.parsed_label})</td><td class="tr">${l.corr_brl.toFixed(2)}</td><td class="tr">-${l.corr_bps.toFixed(2)}</td></tr>`;
+        }
     });
     html += `<tr><td class="bold">Total</td><td class="tr bold">R$ ${r.total_corr.toFixed(2)}</td><td class="tr bold">-${r.total_corr_bps.toFixed(2)}</td></tr></table></div></div>`;
     el.innerHTML = html;
@@ -664,14 +696,27 @@ async function switchChartTab(tab) {
 
 function renderMtmTable(table, legs) {
     const el = document.getElementById("mtmTable");
-    const legLabels = legs.map(l => `${l.instrument} ${l.parsed_label}`);
+    const autoIdxs = legs.map((l, i) => l.auto ? i : -1).filter(i => i >= 0);
+    const userIdxs = legs.map((l, i) => l.auto ? -1 : i).filter(i => i >= 0);
+    const aggregateAuto = autoIdxs.length >= 3;
+
+    const cols = [];
+    userIdxs.forEach(i => cols.push({label: `${legs[i].instrument} ${legs[i].parsed_label}`, idxs: [i], isAuto: false}));
+    if (aggregateAuto) {
+        const hedgeInst = legs[autoIdxs[0]].instrument;
+        cols.push({label: `AUTO ${hedgeInst} Hedge (${autoIdxs.length})`, idxs: autoIdxs, isAuto: true});
+    } else {
+        autoIdxs.forEach(i => cols.push({label: `AUTO ${legs[i].instrument} ${legs[i].parsed_label}`, idxs: [i], isAuto: true}));
+    }
+
     let html = '<div class="sim-card"><div class="sim-card-h">Tabela de Cenários MtM (per-leg P&L)</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
-    legLabels.forEach(lbl => html += `<th class="tr">${lbl}</th>`);
+    cols.forEach(c => html += `<th class="tr${c.isAuto?' muted':''}">${c.label}</th>`);
     html += '<th class="tr bold">Total</th></tr>';
     table.forEach(row => {
         const bg = row.delta === 0 ? ' style="background:#1c2128"' : '';
         html += `<tr${bg}><td class="tc mono">${row.delta}</td>`;
-        row.pnls.forEach(pnl => {
+        cols.forEach(c => {
+            const pnl = c.idxs.reduce((s, i) => s + (row.pnls[i] || 0), 0);
             const cc = pnl > 1 ? " green" : (pnl < -1 ? " red" : "");
             html += `<td class="tr mono${cc}">R$ ${pnl>=0?"+":""}${Math.round(pnl).toLocaleString("pt-BR")}</td>`;
         });

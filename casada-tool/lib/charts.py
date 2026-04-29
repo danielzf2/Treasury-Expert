@@ -236,7 +236,45 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
     if rate_legs:
         _positions = ["top center", "bottom center", "top right", "bottom right",
                       "top left", "bottom left"]
-        for i, l in enumerate(rate_legs):
+        user_rate_legs = [l for l in rate_legs if not l.get("auto")]
+        auto_rate_legs = [l for l in rate_legs if l.get("auto")]
+
+        if len(auto_rate_legs) >= 3:
+            auto_dus_b = [l["du"] for l in auto_rate_legs]
+            auto_rates_b = [l["tax_fin"] for l in auto_rate_legs]
+            auto_rates_a = []
+            auto_labels = []
+            auto_deltas = []
+            for l in auto_rate_legs:
+                d_k = calc_scenario_delta(
+                    l["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+                auto_rates_a.append(l["tax_fin"] + d_k / 100)
+                auto_labels.append(f"AUTO {l['instrument']} {l['parsed']['label']}")
+                auto_deltas.append(d_k)
+            hedge_inst = auto_rate_legs[0]["instrument"]
+            fig.add_trace(go.Scatter(
+                x=auto_dus_b, y=auto_rates_b, mode="markers",
+                name=f"AUTO Hedge ({len(auto_rate_legs)} legs)",
+                marker=dict(size=7, color="#d29922", symbol="diamond-open", line=dict(width=1.5, color="#d29922")),
+                customdata=auto_labels,
+                hovertemplate="%{customdata}<br>DU: %{x}<br>Taxa: %{y:.3f}%<extra>Antes</extra>",
+                legendgroup="auto_hedge", showlegend=True,
+                opacity=0.85,
+            ))
+            fig.add_trace(go.Scatter(
+                x=auto_dus_b, y=auto_rates_a, mode="markers",
+                marker=dict(size=8, color="#d29922", symbol="diamond"),
+                customdata=list(zip(auto_labels, auto_deltas)),
+                hovertemplate="%{customdata[0]}<br>DU: %{x}<br>Taxa: %{y:.3f}%<br>Delta: %{customdata[1]:+.1f}bp<extra>Depois</extra>",
+                legendgroup="auto_hedge", showlegend=False,
+            ))
+            display_legs = user_rate_legs
+        else:
+            display_legs = rate_legs
+
+        for i, l in enumerate(display_legs):
             info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
             is_coupon = info and info.cup_sem > 0
             delta = calc_scenario_delta(
@@ -324,7 +362,7 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
                       dap_curve: list = None) -> go.Figure:
     du_min, du_max = _rate_du_range(legs)
 
-    names, pnls, colors = [], [], []
+    leg_pnls = []
     for l in legs:
         delta = _leg_delta(
             l, du_min, du_max, scenario_key, magnitude,
@@ -336,10 +374,30 @@ def chart_pnl_barras(legs: list[dict], scenario_key: str,
             delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         )
-        prefix = "AUTO " if l.get("auto") else ""
-        names.append(f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}")
-        pnls.append(pnl)
-        colors.append(_GREEN if pnl >= 0 else _RED)
+        leg_pnls.append((l, pnl))
+
+    auto_legs = [(l, p) for l, p in leg_pnls if l.get("auto")]
+    user_legs_pnl = [(l, p) for l, p in leg_pnls if not l.get("auto")]
+
+    names, pnls, colors = [], [], []
+
+    if len(auto_legs) >= 3:
+        for l, p in user_legs_pnl:
+            names.append(f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}")
+            pnls.append(p)
+            colors.append(_GREEN if p >= 0 else _RED)
+        auto_total = sum(p for _, p in auto_legs)
+        first_auto = auto_legs[0][0]
+        hedge_inst = first_auto["instrument"]
+        names.append(f"AUTO {hedge_inst} Hedge ({len(auto_legs)} legs)")
+        pnls.append(auto_total)
+        colors.append("#d29922")
+    else:
+        for l, p in leg_pnls:
+            prefix = "AUTO " if l.get("auto") else ""
+            names.append(f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}")
+            pnls.append(p)
+            colors.append(_GREEN if p >= 0 else _RED)
 
     total = sum(pnls)
     names.append("TOTAL")
@@ -422,10 +480,14 @@ def chart_pnl_por_perna(legs: list[dict],
     du_min, du_max = _rate_du_range(legs)
     fig = go.Figure()
     color_idx = 0
-    for i, l in enumerate(legs):
+
+    auto_legs = [l for l in legs if l.get("auto")]
+    user_legs = [l for l in legs if not l.get("auto")]
+    aggregate_auto = len(auto_legs) >= 3 and not expand_flows
+
+    for i, l in enumerate(user_legs):
         info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
-        prefix = "AUTO " if l.get("auto") else ""
-        name = f"{prefix}{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
+        name = f"{_dir_label(l)} {l['instrument']} {l['parsed']['label']}"
         spot = get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq"))
         is_coupon = info and info.cup_sem > 0
         base_color = COLORS[color_idx % len(COLORS)]
@@ -433,7 +495,6 @@ def chart_pnl_por_perna(legs: list[dict],
 
         if expand_flows and is_coupon and spot:
             cashflows = l.get("cashflows", {}).get("flows") or []
-            n_flows = len(cashflows)
             for k_idx, cf in enumerate(cashflows):
                 pnls = []
                 for d in deltas_range:
@@ -442,10 +503,7 @@ def chart_pnl_por_perna(legs: list[dict],
                         custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                         delta_ipca_bps,
                     )
-                    if res:
-                        pnls.append(res["flows"][k_idx]["pnl_flow"])
-                    else:
-                        pnls.append(0)
+                    pnls.append(res["flows"][k_idx]["pnl_flow"] if res else 0)
                 width = 2 if cf["label"].startswith("Principal") else 1
                 opacity = 1.0 if cf["label"].startswith("Principal") else 0.55
                 fig.add_trace(go.Scatter(
@@ -480,6 +538,51 @@ def chart_pnl_por_perna(legs: list[dict],
                 x=deltas_range, y=pnls, mode="lines", name=name,
                 line=dict(color=base_color, width=2),
             ))
+
+    if aggregate_auto:
+        hedge_inst = auto_legs[0]["instrument"]
+        agg_pnls = []
+        for d in deltas_range:
+            tot = 0.0
+            for l in auto_legs:
+                spot = get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq"))
+                leg_d = _leg_delta(
+                    l, du_min, du_max, scenario_key, d,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+                tot += _smart_leg_pnl(
+                    l, leg_d, scenario_key, d, du_min, du_max, spot,
+                    delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+            agg_pnls.append(tot)
+        fig.add_trace(go.Scatter(
+            x=deltas_range, y=agg_pnls, mode="lines",
+            name=f"AUTO {hedge_inst} Hedge ({len(auto_legs)} legs)",
+            line=dict(color="#d29922", width=2.5, dash="dot"),
+        ))
+    elif auto_legs:
+        for l in auto_legs:
+            spot = get_spot_curve_for_leg(l, di1_curve or [], dap_curve or [], l.get("liq"))
+            base_color = COLORS[color_idx % len(COLORS)]
+            color_idx += 1
+            pnls = []
+            for d in deltas_range:
+                leg_d = _leg_delta(
+                    l, du_min, du_max, scenario_key, d,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+                pnls.append(_smart_leg_pnl(
+                    l, leg_d, scenario_key, d, du_min, du_max, spot,
+                    delta_fx_pct, delta_ipca_bps, delta_cupom_bps,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                ))
+            fig.add_trace(go.Scatter(
+                x=deltas_range, y=pnls, mode="lines",
+                name=f"AUTO {_dir_label(l)} {l['instrument']} {l['parsed']['label']}",
+                line=dict(color=base_color, width=1.5, dash="dash"),
+            ))
+
     fig.update_layout(
         **_base_layout("P&L por Perna — Cenário Selecionado", 350),
         xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),

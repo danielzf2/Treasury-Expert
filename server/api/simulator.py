@@ -393,6 +393,14 @@ def _expand_hedge_legs(processed_legs: list[dict],
     di_vertices = build_di_vertices(di1_curve, liq) if di1_curve else []
     dap_vertices = build_dap_vertices(dap_curve, liq) if dap_curve else []
 
+    user_di_pairs = [(l["du"], l["taxa"]) for l in processed_legs if l.get("instrument") == "DI1"]
+    user_dap_pairs = [(l["du"], l["taxa"]) for l in processed_legs if l.get("instrument") == "DAP"]
+
+    if not di_vertices and user_di_pairs:
+        di_vertices = sorted(user_di_pairs)
+    if not dap_vertices and user_dap_pairs:
+        dap_vertices = sorted(user_dap_pairs)
+
     def _rate_at_du(du: int, hedge_inst: str, fallback: float) -> float:
         verts = dap_vertices if hedge_inst == "DAP" else di_vertices
         r = flat_forward_interp(verts, du) if verts else None
