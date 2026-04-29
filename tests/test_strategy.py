@@ -181,49 +181,54 @@ def test_risk_factors_casada_zerocoupon_has_no_inclinacao(preset_name, all_proce
         assert incl["exposto"] is False
 
 
-def test_risk_factors_dol_di1_cancels_pre(all_processed_legs):
-    """DOL+DI1 cupom sint.: 'Nivel (taxa pre BRL)' NAO exposta + 'Cambio' NAO exposta."""
+def test_risk_factors_dol_di1_cupom_sint(all_processed_legs):
+    """DOL+DI1 cupom sint.: USD e Pre como residuais expostos, CDI recebe."""
     legs = all_processed_legs["DOL+DI1 (cupom sint.)"]
     strat = detect_strategy(legs, SPOT)
     factors = analyze_risk_factors(legs, strat)
+    factor_names = [f["fator"] for f in factors]
 
-    nivel = next((f for f in factors if "Nivel" in f["fator"]), None)
-    assert nivel is not None
-    assert nivel["exposto"] is False
+    # USD deve ser residual exposto
+    usd = next((f for f in factors if "USD" in f["fator"]), None)
+    assert usd is not None
+    assert usd["exposto"] is True
 
-    cambio = next((f for f in factors if "Cambio" in f["fator"]), None)
-    assert cambio is not None
-    assert cambio["exposto"] is False
-
-    cupom = next((f for f in factors if "Cupom Cambial" in f["fator"]), None)
-    assert cupom is not None
-    assert cupom["exposto"] is True
+    # Pre deve ser residual exposto (DI1 paga Pre, nao tem contraparte)
+    pre = next((f for f in factors if "Pre" in f["fator"]), None)
+    assert pre is not None
+    assert pre["exposto"] is True
 
 
 def test_risk_factors_di_frc_dol_sint(all_processed_legs):
-    """DI1+FRC (dol sint.): Cambio exposto=True, Nivel pre nao exposto, Cupom hedgeado."""
+    """DI1+FRC (dol sint.): CDI cancela, Pre e CupLimpo residuais expostos."""
     legs = all_processed_legs["DI1+FRC (dol sint.)"]
     strat = detect_strategy(legs, SPOT)
     factors = analyze_risk_factors(legs, strat)
 
-    cambio = next((f for f in factors if "Cambio" in f["fator"]), None)
-    assert cambio is not None
-    assert cambio["exposto"] is True
+    cdi_cancel = next((f for f in factors if "CDI" in f["fator"] and "cancela" in f["fator"]), None)
+    assert cdi_cancel is not None
+    assert cdi_cancel["exposto"] is False
 
-    nivel = next((f for f in factors if "Nivel" in f["fator"]), None)
-    if nivel:
-        assert nivel["exposto"] is False
+    # Pre e CupLimpo sao residuais
+    pre = next((f for f in factors if "Pre" in f["fator"]), None)
+    assert pre is not None
+    cupl = next((f for f in factors if "CupLimpo" in f["fator"]), None)
+    assert cupl is not None
 
 
-def test_risk_factors_ntnb_dap_hedges_ipca(all_processed_legs):
-    """Casada NTN-B+DAP: 'Inflacao (IPCA)' exposto=False (hedgeado)."""
+def test_risk_factors_ntnb_dap_ipca_cancela(all_processed_legs):
+    """Casada NTN-B+DAP: IPCA+ cancela (motor), spread basis exposto."""
     legs = all_processed_legs["Casada NTN-B+DAP"]
     strat = detect_strategy(legs, SPOT)
     factors = analyze_risk_factors(legs, strat)
 
-    ipca = next((f for f in factors if "Inflacao" in f["fator"]), None)
-    assert ipca is not None
-    assert ipca["exposto"] is False
+    ipca_cancel = next((f for f in factors if "IPCA+" in f["fator"] and "cancela" in f["fator"]), None)
+    assert ipca_cancel is not None
+    assert ipca_cancel["exposto"] is False
+
+    spread = next((f for f in factors if "Spread" in f["fator"]), None)
+    assert spread is not None
+    assert spread["exposto"] is True
 
 
 @pytest.mark.parametrize("preset_name", SINGLE_LEG_PRESETS)

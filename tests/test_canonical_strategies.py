@@ -76,10 +76,12 @@ class TestNtnbSintetica:
     def test_risk_factors_ntnb_sint(self, legs_ntnb_sint):
         s = detect_strategy(legs_ntnb_sint, SPOT)
         factors = analyze_risk_factors(legs_ntnb_sint, s)
-        # Deve expor IPCA (porque vira NTN-B sintetica)
-        ipca = next((f for f in factors if "Inflacao" in f["fator"]), None)
+        # IPCA+ deve ser residual exposto (NTN-B sintetica recebe IPCA+)
+        ipca = next((f for f in factors if "IPCA+" in f["fator"] and f["exposto"]), None)
         assert ipca is not None
-        assert ipca["exposto"] is True
+        # CDI deve cancelar (Selic~CDI do LFT vs CDI do DAP)
+        cdi = next((f for f in factors if "CDI" in f["fator"] and "cancela" in f["fator"]), None)
+        assert cdi is not None
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +112,12 @@ class TestHedgeIpcaSintetico:
     def test_risk_factors_ipca_sint(self, legs_ipca_sint):
         s = detect_strategy(legs_ipca_sint, SPOT)
         factors = analyze_risk_factors(legs_ipca_sint, s)
-        # IPCA exposto, CDI cancela, cupom real exposto
-        ipca = next(f for f in factors if "Inflacao" in f["fator"])
+        # CDI cancela (DI1 CDI vs DAP CDI), IPCA+ e Pre residuais
+        cdi = next((f for f in factors if "CDI" in f["fator"] and "cancela" in f["fator"]), None)
+        assert cdi is not None
+        ipca = next((f for f in factors if "IPCA+" in f["fator"]), None)
+        assert ipca is not None
         assert ipca["exposto"] is True
-        nivel = next(f for f in factors if "Nivel" in f["fator"])
-        assert nivel["exposto"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +146,9 @@ class TestFraCupomIpca:
     def test_risk_factors_fra(self, legs_fra):
         s = detect_strategy(legs_fra, SPOT)
         factors = analyze_risk_factors(legs_fra, s)
-        # Inclinacao exposta, paralelo cancela, IPCA cancela
-        incl = next(f for f in factors if "Inclinacao" in f["fator"])
-        assert incl["exposto"] is True
-        ipca = next(f for f in factors if "Inflacao" in f["fator"])
+        # IPCA+ cancela (ambas pernas DAP opostas), CDI cancela
+        ipca = next((f for f in factors if "IPCA+" in f["fator"] and "cancela" in f["fator"]), None)
+        assert ipca is not None
         assert ipca["exposto"] is False
 
 
