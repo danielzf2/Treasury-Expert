@@ -403,7 +403,7 @@ class TreasuryIndex:
 
 # ── MCP Server ────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("treasury-docs")
+mcp = FastMCP("treasury-expert-dzf")
 index: TreasuryIndex | None = None
 
 
