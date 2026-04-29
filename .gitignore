@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+/dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test cache
+.pytest_cache/
+
+# PDFs (source files, too large for git)
+*.pdf
+
+# Environment
+.env
+.env.local
+
+# Frontend
+web/node_modules/
+web/tsconfig.tsbuildinfo

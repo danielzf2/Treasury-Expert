@@ -1,0 +1,8 @@
+fastmcp>=2.3.0
+rank-bm25
+numpy
+uvicorn
+pytest
+fastapi
+openai
+httpx
