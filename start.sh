@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export PYTHONPATH="/app/casada-tool:${PYTHONPATH}"
+
 echo "Starting Treasury Expert (Streamlit + MCP) on :${PORT:-8080}..."
 exec streamlit run asgi_app.py \
     --server.port "${PORT:-8080}" \
