@@ -91,8 +91,8 @@ async def serve_index(request):
 
 routes = [
     Route("/health", root_health),
-    Mount("/api", app=api),
     Mount("/sim", app=api),
+    Mount("/api", app=api),
     Mount("/mcp", app=mcp_app),
 ]
 

@@ -22,7 +22,7 @@ from lib.charts import (
     chart_cupom_cambial, chart_dol_forward, chart_taxa_real,
 )
 
-router = APIRouter(prefix="/sim", tags=["simulator"])
+router = APIRouter(tags=["simulator"])
 
 # ---------------------------------------------------------------------------
 # PRESETS
