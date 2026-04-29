@@ -5,14 +5,19 @@ from .instruments import INSTRUMENTS, duration, dv01
 
 
 def get_exposure(instrumento: str, direcao: str, taxa: float) -> dict:
-    """Retorna ativo/passivo economico de uma perna.
+    """Retorna ativo/passivo economico de uma perna (swap equivalente livro B3).
 
-    Compra LTN    → Ativo: Pre X%,     Passivo: —
-    Compra DI1    → Ativo: CDI,        Passivo: Pre Y%
-    Compra DOL    → Ativo: DOL cotacao, Passivo: —
-    Compra DDI    → Ativo: CDI,        Passivo: CupSujo X%
-    Compra FRC    → Ativo: CDI,        Passivo: CupLimpo X%
-    Compra DAP    → Ativo: IPCA,       Passivo: IPCA+ Y%
+    Compra LTN    → Ativo: Pre X%,       Passivo: —
+    Compra NTN-F  → Ativo: Pre X%,       Passivo: —
+    Compra NTN-B  → Ativo: IPCA+ X%,     Passivo: —
+    Compra LFT    → Ativo: Selic+ X%,    Passivo: —
+    Compra DI1    → Ativo: CDI,          Passivo: Pre Y%
+    Compra DAP    → Ativo: CDI (DI Over), Passivo: IPCA+ Y%  (livro B3 DAP, Swap Equivalente)
+    Compra DOL    → Ativo: DOL cotacao,   Passivo: —
+    Compra DDI    → Ativo: CDI,          Passivo: CupSujo X%
+    Compra FRC    → Ativo: CDI,          Passivo: CupLimpo X%
+
+    Venda inverte ativo/passivo.
     """
     info = INSTRUMENTS[instrumento]
     rs = f"{taxa:.3f}%"
