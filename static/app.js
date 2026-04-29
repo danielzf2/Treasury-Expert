@@ -500,7 +500,12 @@ function renderAvTable(r) {
                 <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
         });
     }
-    html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr></table></div>`;
+    html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
+    if (r.strategy.economic_description) {
+        const name = r.strategy.name ? `<span style="color:#58a6ff;font-weight:600">${r.strategy.name}</span> — ` : "";
+        html += `<tr class="av-econ"><td colspan="5" style="padding:8px 12px;font-size:11.5px;line-height:1.5;color:#8b949e;border-top:1px dashed rgba(100,100,100,0.2)">${name}${r.strategy.economic_description}</td></tr>`;
+    }
+    html += `</table></div>`;
     el.innerHTML = html;
 }
 

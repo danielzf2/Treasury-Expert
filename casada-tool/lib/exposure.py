@@ -29,10 +29,235 @@ def get_exposure(instrumento: str, direcao: str, taxa: float) -> dict:
         val = f"{info.benchmark} {rs}"
         return {"ativo": "CDI", "passivo": val} if direcao == "C" else {"ativo": val, "passivo": "CDI"}
 
-    pay_bm = "IPCA+" if instrumento == "DAP" else "Pre"
-    rec_bm = "CDI" if instrumento == "DI1" else "IPCA"
+    # Swap equivalente do livro B3:
+    # - DI1 comprado: ativo CDI, passivo Pre (livro Mercado Renda Fixa 14.2.1)
+    # - DAP comprado: ativo CDI/DI Over, passivo IPCA + cupom (livro DAP, Swap Equivalente):
+    #   "o comprador do DAP fica ativo em DI Over e passivo em IPCA + Cupom"
+    if instrumento == "DAP":
+        pay_bm = "IPCA+"
+        rec_bm = "CDI"  # DI Over conforme swap equivalente do livro DAP B3
+    else:  # DI1
+        pay_bm = "Pre"
+        rec_bm = "CDI"
     val = f"{pay_bm} {rs}"
     return {"ativo": rec_bm, "passivo": val} if direcao == "C" else {"ativo": val, "passivo": rec_bm}
+
+
+# ---------------------------------------------------------------------------
+# Motor generico de exposicoes
+# ---------------------------------------------------------------------------
+
+# Fatores reconhecidos e regras de equivalencia
+_FACTOR_EQUIVALENCES = {"Selic+": "CDI"}  # Selic ~= CDI para cancelamento
+
+
+def _parse_exposure_entry(side_str: str) -> list[dict]:
+    """Converte string ativo/passivo em lista de {factor, rate}.
+
+    Exemplos:
+      'CDI'             -> [{'factor': 'CDI', 'rate': None}]
+      'Pre 13.650%'     -> [{'factor': 'Pre', 'rate': 13.65}]
+      'IPCA+ 7.400%'    -> [{'factor': 'IPCA+', 'rate': 7.40}]
+      'CupLimpo 5.060%' -> [{'factor': 'CupLimpo', 'rate': 5.06}]
+      'DOL 4976.5'      -> [{'factor': 'USD', 'rate': 4976.5}]
+      '—'               -> []
+    """
+    s = side_str.strip()
+    if not s or s == "—":
+        return []
+
+    if s.startswith("DOL"):
+        parts = s.split()
+        rate = float(parts[1]) if len(parts) > 1 else 0.0
+        return [{"factor": "USD", "rate": rate}]
+
+    parts = s.split()
+    if len(parts) == 1:
+        factor = _FACTOR_EQUIVALENCES.get(parts[0], parts[0])
+        return [{"factor": factor, "rate": None}]
+
+    factor = parts[0]
+    rate_str = parts[1].replace("%", "").strip()
+    try:
+        rate = float(rate_str)
+    except ValueError:
+        rate = None
+    factor = _FACTOR_EQUIVALENCES.get(factor, factor)
+    return [{"factor": factor, "rate": rate}]
+
+
+def compute_net_exposure(legs: list[dict]) -> dict:
+    """Soma exposicoes de todas as pernas e cancela fatores iguais.
+
+    Para cada perna:
+    1. Chama get_exposure(instrumento, direcao, taxa) -> {ativo, passivo}
+    2. Parseia cada lado em entries {factor, rate}
+    3. Acumula em bags: bags[factor]["ativo"] e bags[factor]["passivo"]
+
+    Cancelamento:
+    - Se um fator aparece em AMBOS os lados (ativo e passivo), cancela.
+    - Se ambos tem taxa explicita, spread = soma_ativo - soma_passivo (em %).
+    - Se taxa eh implicita (CDI puro), cancela zerado.
+    - Fatores sem contraparte ficam como exposicao residual.
+
+    Retorna dict com:
+      entries: lista de todas as entries brutas
+      bags: {factor: {ativo: [{rate, leg_label}], passivo: [...]}}
+      cancelled: [{factor, ativo_total, passivo_total, spread_pct}]
+      residual: [{factor, side, rate_total, direction}]
+      result_label: string concisa (ex: 'CDI +11 bps')
+      result_description: explicacao de 1-2 linhas
+    """
+    bags: dict[str, dict[str, list]] = {}
+    all_entries: list[dict] = []
+
+    for leg in legs:
+        inst = leg["instrument"]
+        direction = leg["direction"]
+        taxa = leg.get("tax_fin", leg.get("taxa", 0))
+        label = f"{direction} {inst} {leg.get('parsed', {}).get('label', leg.get('parsed_label', ''))}"
+
+        exp = get_exposure(inst, direction, taxa)
+
+        for side in ("ativo", "passivo"):
+            entries = _parse_exposure_entry(exp.get(side, "—"))
+            for e in entries:
+                factor = e["factor"]
+                if factor not in bags:
+                    bags[factor] = {"ativo": [], "passivo": []}
+                bags[factor][side].append({
+                    "rate": e["rate"],
+                    "leg_label": label,
+                    "instrument": inst,
+                })
+                all_entries.append({**e, "side": side, "leg_label": label})
+
+    cancelled: list[dict] = []
+    residual: list[dict] = []
+
+    for factor, sides in bags.items():
+        has_ativo = len(sides["ativo"]) > 0
+        has_passivo = len(sides["passivo"]) > 0
+
+        if has_ativo and has_passivo:
+            ativo_rates = [e["rate"] for e in sides["ativo"] if e["rate"] is not None]
+            passivo_rates = [e["rate"] for e in sides["passivo"] if e["rate"] is not None]
+
+            if ativo_rates and passivo_rates:
+                spread = sum(ativo_rates) - sum(passivo_rates)
+            else:
+                spread = 0.0
+
+            ativo_legs = [e["leg_label"] for e in sides["ativo"]]
+            passivo_legs = [e["leg_label"] for e in sides["passivo"]]
+            cancelled.append({
+                "factor": factor,
+                "ativo_total": sum(ativo_rates) if ativo_rates else None,
+                "passivo_total": sum(passivo_rates) if passivo_rates else None,
+                "spread_pct": spread,
+                "spread_bps": round(spread * 100, 2) if spread else 0.0,
+                "ativo_legs": ativo_legs,
+                "passivo_legs": passivo_legs,
+            })
+        else:
+            side = "ativo" if has_ativo else "passivo"
+            entries = sides[side]
+            rates = [e["rate"] for e in entries if e["rate"] is not None]
+            rate_total = sum(rates) if rates else None
+            leg_labels = [e["leg_label"] for e in entries]
+            direction = "recebe" if side == "ativo" else "paga"
+            residual.append({
+                "factor": factor,
+                "side": side,
+                "rate_total": rate_total,
+                "direction": direction,
+                "legs": leg_labels,
+            })
+
+    result_label = _build_result_label(cancelled, residual)
+    result_description = _build_result_description(cancelled, residual)
+
+    return {
+        "entries": all_entries,
+        "bags": {f: {s: [dict(e) for e in es] for s, es in sv.items()} for f, sv in bags.items()},
+        "cancelled": cancelled,
+        "residual": residual,
+        "result_label": result_label,
+        "result_description": result_description,
+    }
+
+
+def _build_result_label(cancelled: list[dict], residual: list[dict]) -> str:
+    """Gera label concisa tipo 'CDI +11 bps' ou 'IPCA+ 7.50% + USD direcional'."""
+    parts: list[str] = []
+
+    # Fatores cancelados com spread
+    for c in cancelled:
+        if c["factor"] == "CDI":
+            continue  # CDI puro cancelando nao gera label proprio
+        if c["spread_bps"]:
+            parts.append(f"{c['factor']} cancela (spread {c['spread_bps']:+.0f} bps)")
+
+    # CDI residual pos-cancelamento: se Pre cancelou com spread, resultado eh CDI + spread
+    pre_cancel = next((c for c in cancelled if c["factor"] == "Pre"), None)
+    ipca_cancel = next((c for c in cancelled if c["factor"] == "IPCA+"), None)
+    cdi_cancel = next((c for c in cancelled if c["factor"] == "CDI"), None)
+
+    if pre_cancel and pre_cancel["spread_bps"]:
+        return f"CDI {pre_cancel['spread_bps']:+.0f} bps"
+    if ipca_cancel and ipca_cancel["spread_bps"]:
+        return f"CDI {ipca_cancel['spread_bps']:+.0f} bps"
+
+    # Fatores residuais
+    for r in residual:
+        factor = r["factor"]
+        if factor == "CDI":
+            continue  # CDI puro sem contraparte = pos-fixado
+        rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
+        dir_str = "recebe" if r["direction"] == "recebe" else "paga"
+        parts.append(f"{dir_str} {factor}{rate_str}")
+
+    if not parts:
+        has_cdi = any(c["factor"] == "CDI" for c in cancelled) or any(r["factor"] == "CDI" for r in residual)
+        if has_cdi:
+            return "CDI puro (fatores cancelam)"
+        return "Posicao neutra"
+
+    return " | ".join(parts)
+
+
+def _build_result_description(cancelled: list[dict], residual: list[dict]) -> str:
+    """Gera descricao de 1-2 linhas explicando cancelamentos e resultado."""
+    parts: list[str] = []
+
+    for c in cancelled:
+        if c["factor"] == "CDI" and c["spread_pct"] == 0:
+            parts.append(f"CDI cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])}")
+            continue
+        ativo_str = f"{c['ativo_total']:.3f}%" if c["ativo_total"] is not None else "implicito"
+        passivo_str = f"{c['passivo_total']:.3f}%" if c["passivo_total"] is not None else "implicito"
+        if c["spread_bps"]:
+            parts.append(
+                f"{c['factor']} cancela ({', '.join(c['ativo_legs'])} {ativo_str} vs "
+                f"{', '.join(c['passivo_legs'])} {passivo_str}, spread {c['spread_bps']:+.0f} bps)"
+            )
+        else:
+            parts.append(f"{c['factor']} cancela entre pernas")
+
+    for r in residual:
+        if r["factor"] == "CDI":
+            continue
+        rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
+        parts.append(f"Exposto a {r['factor']}{rate_str} ({', '.join(r['legs'])})")
+
+    pre_cancel = next((c for c in cancelled if c["factor"] == "Pre"), None)
+    ipca_cancel = next((c for c in cancelled if c["factor"] == "IPCA+"), None)
+    if pre_cancel and pre_cancel["spread_bps"]:
+        parts.append(f"Resultado pos-fixado CDI {pre_cancel['spread_bps']:+.0f} bps de spread")
+    elif ipca_cancel and ipca_cancel["spread_bps"]:
+        parts.append(f"Resultado pos-fixado CDI {ipca_cancel['spread_bps']:+.0f} bps de spread real")
+
+    return ". ".join(parts) + "." if parts else ""
 
 
 def _dol_sintetico_fwd(spot: float, taxa_di: float, taxa_frc: float,
@@ -59,37 +284,110 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
     from .instruments import cupom_cambial_implicito
 
     if len(legs) == 1:
+        net = compute_net_exposure(legs)
         r = legs[0]
         info = INSTRUMENTS[r["instrument"]]
         d = "Comprado" if r["direction"] == "C" else "Vendido"
         if info.conv == "price":
-            return {"result": f"{d} DOL {r['parsed']['label']} a {r['taxa']:.1f}", "type": "single"}
+            return {"result": f"{d} DOL {r['parsed']['label']} a {r['taxa']:.1f}", "type": "single",
+                    "economic_description": net["result_description"], "net_exposure": net}
         if info.conv == "lin360":
-            return {"result": f"{d} {info.benchmark} {r['taxa']:.2f}% a.a. lin360 ({r['parsed']['label']}), PU {r['pu']:.2f}", "type": "single"}
-        return {"result": f"{d} {r['instrument']} {r['parsed']['label']} a {r['taxa']:.3f}%, PU {r['pu']:.2f}, Fin R$ {r['fin']:,.0f}", "type": "single"}
+            return {"result": f"{d} {info.benchmark} {r['taxa']:.2f}% a.a. lin360 ({r['parsed']['label']}), PU {r['pu']:.2f}", "type": "single",
+                    "economic_description": net["result_description"], "net_exposure": net}
+        return {"result": f"{d} {r['instrument']} {r['parsed']['label']} a {r['taxa']:.3f}%, PU {r['pu']:.2f}, Fin R$ {r['fin']:,.0f}", "type": "single",
+                "economic_description": net["result_description"], "net_exposure": net}
 
     def _find_pair(legs_pool):
-        """Tenta encontrar um par reconhecido dentro das pernas."""
+        """Tenta encontrar um par reconhecido dentro das pernas.
+
+        Estrategias canonicas detectadas (ref: livro B3 DAP cap.6 Estrategias
+        Operacionais):
+        - Casada Pre LTN/NTN-F + DI1 (mesma direcao, mesmo vcto): pos-fixada CDI
+        - Carteira IPCA Flutuante NTN-B + DAP (mesma direcao): pos-fixada CDI
+        - Venda Casada NTN-B + DAP (V+V): caixa em CDI (mesmo branch acima)
+        - NTN-B Sintetica LFT + V DAP (mesmo vcto, direcoes opostas): IPCA + cupom_DAP
+        - Hedge IPCA Sintetico DI1 + V DAP (vcto similar, direcoes opostas): IPCA sint
+        - Direcional Inclinacao DAP curto + DAP longo (direcoes opostas): FRA real
+        - Cupom Cambial Sintetico DOL + DI1 (mesma direcao)
+        - Dolar Sintetico DI1 + FRC ou DI1 + DDI (direcoes opostas)
+        """
         tpfs = [l for l in legs_pool if INSTRUMENTS[l["instrument"]].type == "tpf"]
         dis = [l for l in legs_pool if l["instrument"] == "DI1"]
         daps = [l for l in legs_pool if l["instrument"] == "DAP"]
         dols = [l for l in legs_pool if l["instrument"] == "DOL"]
+        lfts = [l for l in tpfs if l["instrument"] == "LFT"]
+        ntnbs = [l for l in tpfs if l["instrument"] == "NTN-B"]
+        ntnfs = [l for l in tpfs if l["instrument"] == "NTN-F"]
+        ltns = [l for l in tpfs if l["instrument"] == "LTN"]
 
-        for t in tpfs:
+        # --- 1. Casada Pre: LTN/NTN-F + DI1, mesma direcao, mesmo vcto ---
+        for t in (ltns + ntnfs):
             for d in dis:
                 if t["parsed"]["label"] == d["parsed"]["label"] and t["direction"] == d["direction"]:
                     spread = (t["tax_fin"] - d["taxa"]) * 100
-                    bmk = "IPCA" if t["instrument"] == "NTN-B" else "CDI"
-                    return {"type": "casada", "spread": spread, "bmk": bmk, "tpf": t, "di": d,
-                            "result": f"{bmk} {spread:+.2f} bps"}
+                    name = "Casada Pre (LTN/NTN-F+DI1)"
+                    return {"type": "casada", "name": name,
+                            "spread": spread, "bmk": "CDI",
+                            "tpf": t, "di": d,
+                            "result": f"CDI {spread:+.2f} bps"}
 
-        for t in [l for l in tpfs if l["instrument"] == "NTN-B"]:
+        # --- 2. Carteira NTN-B IPCA Flutuante: NTN-B + DAP mesma direcao ---
+        for t in ntnbs:
             for d in daps:
                 if t["parsed"]["label"] == d["parsed"]["label"] and t["direction"] == d["direction"]:
+                    # Livro B3 DAP "Carteira de NTN-B com Cupom de IPCA Flutuante
+                    # (Equivalente a uma carteira pos-fixada)". DAP comprado troca
+                    # o cupom fixo por flutuante; IPCA cancela; resultado = CDI.
                     spread = (t["tax_fin"] - d["taxa"]) * 100
-                    return {"type": "casada", "spread": spread, "bmk": "IPCA", "tpf": t, "di": d,
-                            "result": f"IPCA {spread:+.2f} bps"}
+                    is_venda = t["direction"] == "V"
+                    name = "Venda Casada NTN-B+DAP" if is_venda else "Carteira NTN-B com Cupom IPCA Flutuante"
+                    return {"type": "casada", "name": name,
+                            "spread": spread, "bmk": "CDI",
+                            "tpf": t, "di": d,
+                            "result": f"CDI {spread:+.2f} bps"}
 
+        # --- 3. NTN-B Sintetica: LFT + DAP em direcoes opostas ---
+        # Livro B3 DAP "NTN-B Sintetica (Conversao de uma carteira de LFT em NTN-B)"
+        # LFT recebe Selic ≈ CDI; comprar DAP transforma essa rentabilidade em IPCA+cupom
+        for t in lfts:
+            for d in daps:
+                if t["direction"] != d["direction"]:
+                    cupom_dap = d["taxa"]
+                    return {"type": "ntnb_sint", "name": "NTN-B Sintetica (LFT + DAP)",
+                            "cupom_dap": cupom_dap,
+                            "tpf": t, "di": d, "bmk": "IPCA",
+                            "result": f"NTN-B Sintetica (LFT+DAP opostos): IPCA + {cupom_dap:.2f}%"}
+
+        # --- 4. Hedge IPCA Sintetico: DI1 + DAP em direcoes opostas ---
+        # Livro B3 DAP "Hedge em IPCA Sintetico" (DI + V DAP = IPCA sintetico via futuros)
+        # IPCA = CDI - cupom_real. DI cancela CDI; DAP fornece IPCA - cupom_DAP. Soma: -cupom_DAP.
+        for d in dis:
+            for da in daps:
+                if d["direction"] != da["direction"]:
+                    spread = (d["taxa"] - da["taxa"]) * 100
+                    direc = "Comprado" if d["direction"] == "C" else "Vendido"
+                    return {"type": "ipca_sint", "name": "Hedge IPCA Sintetico (DI1 + DAP)",
+                            "spread": spread,
+                            "di": d, "dap": da, "bmk": "IPCA",
+                            "result": f"{direc} IPCA Sintetico (DI1+DAP opostos): IPCA {spread:+.2f} bps"}
+
+        # --- 5. Direcional Inclinacao / FRA Cupom IPCA: 2 DAPs vctos diferentes opostos ---
+        # Livro B3 DAP "Posicoes direcionais em inclinacao e FRA de Cupom de IPCA"
+        if len(daps) >= 2:
+            for i, d1 in enumerate(daps):
+                for d2 in daps[i+1:]:
+                    if d1["direction"] != d2["direction"] and d1["parsed"]["label"] != d2["parsed"]["label"]:
+                        curto = d1 if d1["du"] < d2["du"] else d2
+                        longo = d2 if d1["du"] < d2["du"] else d1
+                        spread = (longo["taxa"] - curto["taxa"]) * 100
+                        direc_curto = "C" if curto["direction"] == "C" else "V"
+                        direc_longo = "C" if longo["direction"] == "C" else "V"
+                        return {"type": "fra_real", "name": "FRA Cupom IPCA / Direcional Inclinacao DAP",
+                                "spread": spread,
+                                "dap_curto": curto, "dap_longo": longo, "bmk": "Cupom IPCA fwd",
+                                "result": f"FRA Cupom IPCA ({direc_curto} {curto['parsed']['label']} + {direc_longo} {longo['parsed']['label']}): inclinacao real {spread:+.2f} bps"}
+
+        # --- 6. Cupom Cambial Sintetico: DOL + DI1 mesma direcao ---
         for dol in dols:
             for d in dis:
                 if dol["direction"] == d["direction"]:
@@ -98,9 +396,11 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
                     cupom = cupom_cambial_implicito(spot, dol["taxa"], d["taxa"], du_ref, dc_ref)
                     direc = "Comprado" if dol["direction"] == "C" else "Vendido"
                     vcto_note = "" if dol["parsed"]["label"] == d["parsed"]["label"] else f" (DOL {dol['parsed']['label']}, DI {d['parsed']['label']})"
-                    return {"type": "cupom_sint", "cupom": cupom, "dol": dol, "di": d,
+                    return {"type": "cupom_sint", "name": "Cupom Cambial Sintetico (DOL + DI1)",
+                            "cupom": cupom, "dol": dol, "di": d,
                             "result": f"{direc} Cupom Cambial Sintetico: {cupom:.2f}% a.a.{vcto_note}"}
 
+        # --- 7. Dolar Sintetico: DI1 + FRC/DDI em direcoes opostas ---
         frcs = [l for l in legs_pool if l["instrument"] == "FRC"]
         ddis = [l for l in legs_pool if l["instrument"] == "DDI"]
 
@@ -109,31 +409,121 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
                 if d["parsed"]["label"] == f["parsed"]["label"] and d["direction"] != f["direction"]:
                     direc = "Comprado" if d["direction"] == "C" else "Vendido"
                     fwd = _dol_sintetico_fwd(spot, d["taxa"], f["taxa"], d["du"], f["dc"])
-                    return {"type": "dol_sint", "di": d, "frc": f, "fwd": fwd,
+                    return {"type": "dol_sint", "name": "Dolar Sintetico (DI1 + FRC)",
+                            "di": d, "frc": f, "fwd": fwd,
                             "result": f"{direc} Dolar Sintetico (DI1+FRC): fwd ~{fwd:.2f}"}
 
         for d in dis:
             for dd in ddis:
                 if d["parsed"]["label"] == dd["parsed"]["label"] and d["direction"] != dd["direction"]:
                     direc = "Comprado" if d["direction"] == "C" else "Vendido"
-                    return {"type": "dol_sint_ddi", "di": d, "ddi": dd,
+                    return {"type": "dol_sint_ddi", "name": "Dolar Sintetico (DI1 + DDI)",
+                            "di": d, "ddi": dd,
                             "result": f"{direc} Dolar Sintetico (DI1+DDI)"}
 
         return None
 
-    pair = _find_pair(legs)
-    if pair:
-        return pair
+    # 1. Motor generico SEMPRE roda: soma exposicoes, cancela fatores, gera resultado
+    net = compute_net_exposure(legs)
 
-    descs = []
-    for l in legs:
-        info = INSTRUMENTS[l["instrument"]]
-        d = "C" if l["direction"] == "C" else "V"
-        if info.conv == "price":
-            descs.append(f"{d} {l['instrument']} {l['parsed']['label']} {l['taxa']:.1f}")
-        else:
-            descs.append(f"{d} {l['instrument']} {l['parsed']['label']} {l['taxa']:.3f}%")
-    return {"result": " | ".join(descs), "type": "multi"}
+    # 2. Hardcoded so decora com nome do livro (nunca sobrescreve resultado do motor)
+    pair = _find_pair(legs)
+
+    # Resultado vem SEMPRE do motor
+    result = {
+        "result": net["result_label"],
+        "type": pair["type"] if pair else "generic",
+        "net_exposure": net,
+        "economic_description": net["result_description"],
+    }
+
+    # Hardcoded adiciona nome, bmk, spread e descricao do livro B3 por cima
+    if pair:
+        result["name"] = pair.get("name")
+        result["bmk"] = pair.get("bmk")
+        result["spread"] = pair.get("spread")
+        result["economic_description"] = _describe_strategy_economic(legs, pair)
+        # Preserva refs de legs usadas pelo hardcoded (pra hedge, serialize, etc)
+        for k in ("tpf", "di", "dol", "frc", "ddi", "dap",
+                   "dap_curto", "dap_longo", "cupom", "fwd", "cupom_dap"):
+            if k in pair:
+                result[k] = pair[k]
+
+    return result
+
+
+def _describe_strategy_economic(legs: list[dict], strategy: dict) -> str:
+    """Descricao economica de 1-2 linhas em linguagem do livro B3.
+
+    Cita o nome canonico (quando aplicavel), o swap equivalente / resultado
+    economico final e a referencia ao livro. Usado para explicar ao usuario
+    o que a operacao significa (alem do label tecnico do strategy.result).
+    """
+    typ = strategy.get("type", "")
+
+    if typ == "casada":
+        tpf = strategy.get("tpf", {})
+        tpf_inst = tpf.get("instrument", "TPF")
+        if tpf_inst == "NTN-B":
+            is_venda = tpf.get("direction") == "V"
+            if is_venda:
+                return (
+                    "Venda Casada de NTN-B com Futuro de Cupom de IPCA (livro B3 DAP, cap.6). "
+                    "Vende NTN-B a vista + vende DAP - caixa rendendo CDI + spread real."
+                )
+            return (
+                "Carteira de NTN-B com Cupom de IPCA Flutuante (livro B3 DAP, cap.6). "
+                "Compra NTN-B + compra DAP transforma cupom real fixo em flutuante; "
+                "IPCA cancela e a posicao vira pos-fixada CDI + spread real."
+            )
+        # LTN ou NTN-F + DI1
+        return (
+            "Casada Pre (LTN/NTN-F + DI1 mesma direcao). "
+            "TPF financiada via DI futuro; o fator pre cancela e a posicao vira "
+            "pos-fixada CDI + spread."
+        )
+
+    if typ == "ntnb_sint":
+        return (
+            "NTN-B Sintetica (Conversao de carteira de LFT em NTN-B, livro B3 DAP cap.6). "
+            "LFT recebe Selic ~CDI; comprar DAP transforma a rentabilidade em IPCA + cupom_DAP fixo."
+        )
+
+    if typ == "ipca_sint":
+        return (
+            "Hedge IPCA Sintetico (DI + DAP em direcoes opostas, livro B3 DAP cap.6). "
+            "DI fornece CDI; DAP transforma CDI em IPCA + cupom; resultado = NTN-B sintetica."
+        )
+
+    if typ == "fra_real":
+        return (
+            "FRA de Cupom de IPCA / Direcional na Inclinacao da curva real (livro B3 DAP cap.6). "
+            "2 DAPs em vencimentos diferentes em direcoes opostas; isola o cupom IPCA forward "
+            "entre os dois prazos sem exposicao paralela."
+        )
+
+    if typ == "cupom_sint":
+        return (
+            "Cupom Cambial Sintetico via paridade coberta de juros. "
+            "Comprar DOL + comprar DI (mesma direcao) cria exposicao ao cupom cambial implicito; "
+            "P&L direcional ao FRC. Equivalente a vender FRC sintetico."
+        )
+
+    if typ in ("dol_sint", "dol_sint_ddi"):
+        return (
+            "Dolar Sintetico via paridade coberta (DI1 + FRC/DDI em direcoes opostas). "
+            "DI fornece CDI BRL; FRC/DDI fornece cupom cambial USD; "
+            "resultado eh forward USD/BRL implicito - posicao direcional pura no dolar spot."
+        )
+
+    if typ == "single":
+        # ja tem result completo
+        return ""
+
+    if typ == "multi":
+        return "Combinacao multi-perna sem padrao canonico reconhecido. Veja fatores de risco."
+
+    return ""
 
 
 def _hedge_instrument_for_tpf(tpf_inst: str) -> str:
@@ -166,9 +556,13 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     has_dap = "DAP" in insts
     has_dol = "DOL" in insts
     has_ntnb = "NTN-B" in insts
+    has_lft = "LFT" in insts
     same_vcto = len(legs) > 1 and all(l["parsed"]["label"] == legs[0]["parsed"]["label"] for l in legs)
     is_casada = strategy["type"] == "casada"
     is_dol_sint = strategy["type"] in ("dol_sint", "dol_sint_ddi")
+    is_ntnb_sint = strategy["type"] == "ntnb_sint"
+    is_ipca_sint = strategy["type"] == "ipca_sint"
+    is_fra_real = strategy["type"] == "fra_real"
 
     coupon_tpf_with_hedge = next(
         (l for l in legs
@@ -250,6 +644,36 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                         "desc": "Perna FRC/DDI fixa o cupom cambial embutido — exposicao residual e o spot do dolar"})
         return factors
 
+    if is_ntnb_sint:
+        # LFT C + DAP V (ou opostos): NTN-B sintetica = IPCA + cupom_DAP
+        factors.append({"fator": "Inflacao (IPCA)", "exposto": True,
+                        "desc": "NTN-B sintetica recebe IPCA + cupom_DAP fixo — exposto a surpresas de IPCA realizado"})
+        factors.append({"fator": "Nivel (Selic vs taxa real)", "exposto": False,
+                        "desc": "LFT recebe Selic (~CDI); DAP transforma CDI em IPCA+cupom — Selic cancela"})
+        factors.append({"fator": "Cupom Real", "exposto": True,
+                        "desc": "Movimento na taxa real (cupom IPCA do DAP) altera o PU — sensivel a inflacao implicita"})
+        return factors
+
+    if is_ipca_sint:
+        # DI1 + DAP em direcoes opostas: IPCA sintetico via futuros
+        factors.append({"fator": "Inflacao (IPCA)", "exposto": True,
+                        "desc": "Hedge IPCA Sintetico expoe direto a inflacao realizada — equivale a NTN-B sintetica"})
+        factors.append({"fator": "Nivel (taxa pre BRL)", "exposto": False,
+                        "desc": "DI fornece CDI; DAP transforma CDI em IPCA+cupom — fator CDI cancela"})
+        factors.append({"fator": "Cupom Real", "exposto": True,
+                        "desc": "Spread DI vs DAP define o cupom real travado; movimento no cupom altera P&L"})
+        return factors
+
+    if is_fra_real:
+        # 2 DAPs vctos diferentes em direcoes opostas: FRA Cupom IPCA
+        factors.append({"fator": "Nivel (shift paralelo curva real)", "exposto": False,
+                        "desc": "Posicoes opostas em prazos diferentes — shift paralelo cancela em 1a ordem"})
+        factors.append({"fator": "Inclinacao curva real (IPCA)", "exposto": True,
+                        "desc": "Trade direcional na inclinacao da curva real entre os 2 vencimentos"})
+        factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
+                        "desc": "Ambas pernas DAP — IPCA cancela; exposicao residual eh o cupom forward entre prazos"})
+        return factors
+
     if is_casada and same_vcto and not has_cupom_tpf:
         factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
                         "desc": "Mesmo vencimento + zero-coupon: DV01 batido — shift paralelo cancela em 1a ordem"})
@@ -308,7 +732,27 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                         "desc": "NTN-B sem DAP — VNA atualizado por IPCA gera P&L direto com surpresa de inflacao"})
     elif has_ntnb and has_dap:
         factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                        "desc": "NTN-B + DAP no mesmo vertice neutraliza IPCA em 1a ordem — exposicao residual e o spread real (taxa IPCA)"})
+                        "desc": "NTN-B+DAP comprados = IPCA flutuante = pos-fixada CDI (livro B3); IPCA cancela, expoe spread real (NTN-B vs DAP)"})
+
+    # --- Fatores genericos derivados de net_exposure (para combinacoes sem branch hardcoded) ---
+    if strategy.get("type") == "generic":
+        net = strategy.get("net_exposure")
+        if net:
+            for c in net["cancelled"]:
+                if c["factor"] == "CDI" and c["spread_pct"] == 0:
+                    continue
+                if c["spread_bps"]:
+                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
+                                    "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps)"})
+                else:
+                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
+                                    "desc": f"{c['factor']} cancela entre pernas"})
+            for r in net["residual"]:
+                if r["factor"] == "CDI":
+                    continue
+                rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
+                factors.append({"fator": r["factor"], "exposto": True,
+                                "desc": f"{r['direction'].capitalize()} {r['factor']}{rate_str} ({', '.join(r['legs'])})"})
 
     return factors
 

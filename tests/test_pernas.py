@@ -329,12 +329,14 @@ def test_side_tax_dir(preset_name, leg_idx, leg_input, all_processed_legs):
 def test_exposure(preset_name, leg_idx, leg_input, all_processed_legs):
     """exp.ativo e exp.passivo corretos.
 
-    Ver lib/exposure.get_exposure:
-    - DOL (price): C -> ativo='DOL <cot>', passivo='—'; V -> ativo='—', passivo='DOL <cot>'
+    Ver lib/exposure.get_exposure (swap equivalente livro B3):
+    - DOL (price): C -> ativo='DOL <cot>', passivo='—'; V -> oposto
     - TPF: C -> ativo='<bench> <taxa>%', passivo='—'; V -> oposto
     - cupom (DDI, FRC): C -> ativo='CDI', passivo='<bench> <taxa>%'; V -> oposto
     - DI1: C -> ativo='CDI', passivo='Pre <taxa>%'; V -> oposto
-    - DAP: C -> ativo='IPCA', passivo='IPCA+ <taxa>%'; V -> oposto
+    - DAP: C -> ativo='CDI' (DI Over), passivo='IPCA+ <taxa>%'; V -> oposto
+      (livro B3 DAP, secao Swap Equivalente: comprador DAP fica ativo em DI Over,
+       passivo em IPCA + Cupom)
     """
     leg = all_processed_legs[preset_name][leg_idx]
     inst = leg_input["instrument"]
@@ -373,9 +375,9 @@ def test_exposure(preset_name, leg_idx, leg_input, all_processed_legs):
             assert leg["exp"]["passivo"] == "CDI"
         return
 
-    # DI1 ou DAP
+    # DI1 ou DAP — ambos com swap equivalente: ativo CDI, passivo {Pre|IPCA+}
     pay_bm = "IPCA+" if inst == "DAP" else "Pre"
-    rec_bm = "CDI" if inst == "DI1" else "IPCA"
+    rec_bm = "CDI"  # DI1: CDI; DAP: CDI/DI Over (swap equivalente livro B3)
     val = f"{pay_bm} {rs}"
     if direction == "C":
         assert leg["exp"]["ativo"] == rec_bm

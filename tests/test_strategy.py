@@ -49,12 +49,12 @@ def test_strategy_casada_spread(preset_name, all_processed_legs):
 
 @pytest.mark.parametrize("preset_name", CASADA_PRESETS)
 def test_strategy_casada_bmk(preset_name, all_processed_legs):
-    """Benchmark do casada: 'IPCA' para NTN-B/DAP, 'CDI' para LTN/NTN-F+DI1."""
+    """Benchmark do casada: SEMPRE 'CDI'. Pre-fixadas (LTN, NTN-F + DI1) cancelam pre.
+    Indexadas (NTN-B + DAP comprados) cancelam IPCA via cupom flutuante e tambem
+    viram pos-fixada CDI (livro B3 DAP, secao 'Carteira IPCA Flutuante')."""
     legs = all_processed_legs[preset_name]
     strat = detect_strategy(legs, SPOT)
-    has_ntnb = any(l["instrument"] == "NTN-B" for l in legs)
-    expected_bmk = "IPCA" if has_ntnb else "CDI"
-    assert strat["bmk"] == expected_bmk
+    assert strat["bmk"] == "CDI"
 
 
 @pytest.mark.parametrize("preset_name", CUPOM_SINT_PRESETS)

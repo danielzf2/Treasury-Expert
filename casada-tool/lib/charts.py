@@ -141,38 +141,39 @@ def _build_smooth_dap_curve(dap_contracts, du_step: int = 5):
 _DAP_COLOR = "#d29922"
 
 
-def _zoom_range(legs: list[dict], instruments: tuple, key: str = "du",
-                fallback_min: float = 0, fallback_max: float = 1000,
-                padding_pct: float = 0.30, padding_min: float = 252) -> tuple[float, float]:
-    """Calcula range de DU/DC do eixo X para zoom adaptativo nas pernas relevantes.
-
-    - Filtra legs por `instruments`
-    - Pega min/max de `key` ('du' ou 'dc')
-    - Aplica padding = max(padding_pct * range, padding_min) em cada lado
-    - Se nenhuma leg, retorna (fallback_min, fallback_max)
-    """
+def _legs_range(legs: list[dict], instruments: tuple, key: str = "du") -> tuple[float, float] | None:
+    """Range (min, max) de DU/DC das legs filtradas por instrumento; None se vazio."""
     rel = [l for l in legs if l.get("instrument") in instruments]
     if not rel:
-        return fallback_min, fallback_max
+        return None
     vals = [l[key] for l in rel if key in l]
     if not vals:
-        return fallback_min, fallback_max
-    vmin = min(vals)
-    vmax = max(vals)
-    rng = max(vmax - vmin, padding_min)
-    pad = max(padding_pct * rng, padding_min)
-    return max(0, vmin - pad), vmax + pad
+        return None
+    return min(vals), max(vals)
 
 
-def _filter_smooth(dus: list, rates: list,
-                   x_min: float, x_max: float) -> tuple[list, list]:
-    """Recorta lista paralela (dus, rates) para o range [x_min, x_max]."""
-    out_dus, out_rates = [], []
-    for du, r in zip(dus, rates):
-        if x_min <= du <= x_max:
-            out_dus.append(du)
-            out_rates.append(r)
-    return out_dus, out_rates
+def _add_legs_shading(fig: go.Figure, legs: list[dict], instruments: tuple,
+                      key: str = "du", color: str = "rgba(88,166,255,0.06)",
+                      label: str = "Legs"):
+    """Adiciona uma faixa vertical sombreada no range das legs relevantes.
+
+    Mostra visualmente onde a posicao esta na curva sem cortar o resto.
+    """
+    rng = _legs_range(legs or [], instruments, key)
+    if not rng:
+        return
+    vmin, vmax = rng
+    # Single point: alarga 1.5% para visualizacao
+    if vmax == vmin:
+        spread = max(vmax * 0.015, 5)
+        vmin -= spread
+        vmax += spread
+    fig.add_vrect(
+        x0=vmin, x1=vmax,
+        fillcolor=color, line_width=0, layer="below",
+        annotation_text=label, annotation_position="top left",
+        annotation_font_size=10, annotation_font_color="#8b949e",
+    )
 
 
 def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
@@ -197,16 +198,9 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
     else:
         du_min_legs, du_max_legs = 0, 1000
 
-    # Range de zoom para o eixo X: focado nas pernas com padding
-    x_min, x_max = _zoom_range(
-        legs, ("LTN", "NTN-F", "LFT", "DI1", "NTN-B", "DAP"),
-        fallback_min=0, fallback_max=du_max_legs * 1.3 if du_max_legs > 0 else 1000,
-    )
-
     if di1_curve:
         try:
             smooth_dus, smooth_rates = _build_smooth_curve(di1_curve, du_step=5)
-            smooth_dus, smooth_rates = _filter_smooth(smooth_dus, smooth_rates, x_min, x_max)
 
             if smooth_dus:
                 fig.add_trace(go.Scatter(
@@ -247,7 +241,6 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
     if dap_curve and (has_ntnb or has_dap_leg):
         try:
             dap_dus, dap_rates = _build_smooth_dap_curve(dap_curve, du_step=5)
-            dap_dus, dap_rates = _filter_smooth(dap_dus, dap_rates, x_min, x_max)
             if dap_dus:
                 fig.add_trace(go.Scatter(
                     x=dap_dus, y=dap_rates, mode="lines",
@@ -384,6 +377,8 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                             opacity=0.85,
                         ))
 
+    _add_legs_shading(fig, legs, ("LTN", "NTN-F", "LFT", "DI1", "NTN-B", "DAP"),
+                       label="Posicao")
     fig.update_layout(
         **_base_layout("Curva de Juros — Flat Forward", 450),
         xaxis=dict(title="Prazo (DU)", gridcolor=_GRID, rangemode="tozero"),
@@ -670,17 +665,8 @@ def chart_cupom_cambial(frc_contracts: list, delta_cupom_bps: float = 0.0,
         fig.update_layout(**_base_layout("Cupom Cambial — sem dados", 400))
         return fig
 
-    # Zoom adaptativo: range das legs cupom (FRC/DDI) com padding por DC
-    x_min, x_max = _zoom_range(
-        legs or [], ("FRC", "DDI"), key="dc",
-        fallback_min=0, fallback_max=3650,  # 10y default
-        padding_min=180,  # ~6 meses de buffer DC
-    )
-    smooth_filtered = [(dc, r) for dc, r in smooth if x_min <= dc <= x_max]
-    if not smooth_filtered:
-        smooth_filtered = smooth
-    dcs_before = [p[0] for p in smooth_filtered]
-    rates_before = [p[1] for p in smooth_filtered]
+    dcs_before = [p[0] for p in smooth]
+    rates_before = [p[1] for p in smooth]
 
     # Range de DC usado para normalizar o cenario
     dc_min = min(dcs_before)
@@ -738,6 +724,9 @@ def chart_cupom_cambial(frc_contracts: list, delta_cupom_bps: float = 0.0,
                 hovertemplate=f"{lbl}<br>DC: %{{x}}<br>Taxa: %{{y:.3f}}%<extra></extra>",
             ))
 
+    if legs:
+        _add_legs_shading(fig, legs, ("FRC", "DDI"), key="dc",
+                           color="rgba(188,140,255,0.07)", label="Posicao")
     fig.update_layout(
         **_base_layout("Cupom Cambial Limpo (FRC) — lin360", 400),
         xaxis=dict(title="Prazo (DC)", gridcolor=_GRID),
@@ -784,16 +773,8 @@ def chart_dol_forward(di1_contracts: list, frc_contracts: list,
         fig.update_layout(**_base_layout("Dolar Forward — sem dados", 400))
         return fig
 
-    # Zoom adaptativo: range das legs DOL/DI/FRC/DDI
-    x_min, x_max = _zoom_range(
-        legs or [], ("DOL", "DI1", "FRC", "DDI"),
-        fallback_min=0, fallback_max=2520,
-    )
-    fwd_filtered = [(du, dc, fwd) for du, dc, fwd in fwd_curve if x_min <= du <= x_max]
-    if not fwd_filtered:
-        fwd_filtered = fwd_curve
-    dus = [p[0] for p in fwd_filtered]
-    fwds_before = [p[2] for p in fwd_filtered]
+    dus = [p[0] for p in fwd_curve]
+    fwds_before = [p[2] for p in fwd_curve]
 
     fig.add_trace(go.Scatter(
         x=dus, y=fwds_before, mode="lines",
@@ -824,12 +805,7 @@ def chart_dol_forward(di1_contracts: list, frc_contracts: list,
         for dc, r in frc_verts
     ]
     fwd_after_curve = build_forward_curve(di_verts_after, frc_verts_after, spot_after, liq)
-    fwd_after_filtered = [
-        (du, dc, fwd) for du, dc, fwd in fwd_after_curve if x_min <= du <= x_max
-    ] if fwd_after_curve else []
-    if not fwd_after_filtered:
-        fwd_after_filtered = fwd_after_curve or []
-    fwds_after = [p[2] for p in fwd_after_filtered] if fwd_after_filtered else fwds_before
+    fwds_after = [p[2] for p in fwd_after_curve] if fwd_after_curve else fwds_before
 
     n = min(len(dus), len(fwds_after))
     fig.add_trace(go.Scatter(
@@ -840,8 +816,8 @@ def chart_dol_forward(di1_contracts: list, frc_contracts: list,
     ))
 
     fig.add_trace(go.Scatter(
-        x=dus[:n] + dus[:n][::-1],
-        y=fwds_after[:n] + fwds_before[:n][::-1],
+        x=dus[:len(fwds_after)] + dus[:len(fwds_after)][::-1],
+        y=fwds_after + fwds_before[:len(fwds_after)][::-1],
         fill="toself", fillcolor="rgba(63,185,80,0.06)",
         line=dict(width=0), showlegend=False, hoverinfo="skip",
     ))
@@ -862,6 +838,9 @@ def chart_dol_forward(di1_contracts: list, frc_contracts: list,
                 hovertemplate=f"{lbl}<br>DU: %{{x}}<br>Cotacao: %{{y:.4f}}<extra></extra>",
             ))
 
+    if legs:
+        _add_legs_shading(fig, legs, ("DOL", "DI1", "FRC", "DDI"),
+                           color="rgba(63,185,80,0.07)", label="Posicao")
     fig.update_layout(
         **_base_layout("Dolar Forward Implicito (paridade coberta)", 400),
         xaxis=dict(title="Prazo (DU)", gridcolor=_GRID),
@@ -898,16 +877,8 @@ def chart_taxa_real(dap_contracts: list, delta_ipca_bps: float = 0.0,
         fig.update_layout(**_base_layout("Taxa Real (DAP) — sem dados", 400))
         return fig
 
-    # Zoom adaptativo: range das legs IPCA com padding
-    x_min, x_max = _zoom_range(
-        legs or [], ("NTN-B", "DAP"),
-        fallback_min=0, fallback_max=2520,  # 10y default se sem legs
-    )
-    smooth_filtered = [(du, r) for du, r in smooth if x_min <= du <= x_max]
-    if not smooth_filtered:
-        smooth_filtered = smooth  # fallback: sem filter se vazio
-    dus = [p[0] for p in smooth_filtered]
-    rates_before = [p[1] for p in smooth_filtered]
+    dus = [p[0] for p in smooth]
+    rates_before = [p[1] for p in smooth]
 
     du_min = min(dus)
     du_max = max(dus)
@@ -963,6 +934,9 @@ def chart_taxa_real(dap_contracts: list, delta_ipca_bps: float = 0.0,
                 hovertemplate=f"{lbl}<br>DU: %{{x}}<br>Taxa: %{{y:.3f}}%<extra></extra>",
             ))
 
+    if legs:
+        _add_legs_shading(fig, legs, ("NTN-B", "DAP"),
+                           color="rgba(210,153,34,0.07)", label="Posicao")
     fig.update_layout(
         **_base_layout("Taxa Real (DAP) — Cupom IPCA", 400),
         xaxis=dict(title="Prazo (DU)", gridcolor=_GRID),
