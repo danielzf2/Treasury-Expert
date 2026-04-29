@@ -42,7 +42,7 @@ PRESETS = {
         {"instrument": "DI1", "ticker": "F31", "direction": "C", "quantity": 20, "taxa": 13.65, "corr_type": "R$/contrato", "corr_value": 1.30},
     ],
     "Casada NTN-B+DAP": [
-        {"instrument": "NTN-B", "ticker": "N29", "direction": "C", "quantity": 2000, "taxa": 7.50, "corr_type": "% na taxa", "corr_value": 0.001},
+        {"instrument": "NTN-B", "ticker": "N29", "direction": "C", "quantity": 2000, "taxa": 7.50, "corr_type": "% na taxa", "corr_value": 0.001, "vna": 4500.0},
         {"instrument": "DAP", "ticker": "N29", "direction": "C", "quantity": 20, "taxa": 7.40, "corr_type": "R$/contrato", "corr_value": 1.30},
     ],
     "DOL+DI1 (cupom sint.)": [
@@ -215,6 +215,9 @@ def _cashflow_breakdown(leg: dict) -> dict | None:
     if not info or info.type != "tpf":
         return None
 
+    leg_vna = leg.get("vna")
+    vna_scale = (leg_vna / 100) if (leg.get("instrument") == "NTN-B" and leg_vna and leg_vna > 0) else 1.0
+
     rows = []
     if info.cup_sem > 0:
         flows = key_rate_duration(
@@ -227,9 +230,9 @@ def _cashflow_breakdown(leg: dict) -> dict | None:
         if not flows:
             return None
 
-        pv_total = sum(f.pv for f in flows)
+        pv_total = sum(f.pv * vna_scale for f in flows)
         duration_macaulay = sum(f.krd for f in flows)
-        duration_anbima_du = sum(f.du * f.pv for f in flows) / pv_total if pv_total else 0.0
+        duration_anbima_du = sum(f.du * f.pv for f in flows) / sum(f.pv for f in flows) if flows else 0.0
 
         for f in flows:
             rows.append({
@@ -237,8 +240,8 @@ def _cashflow_breakdown(leg: dict) -> dict | None:
                 "payment_date": f.payment_date.strftime("%d/%m/%Y") if f.payment_date else "",
                 "du": f.du,
                 "t_anos": f.t_anos,
-                "nominal": f.nominal,
-                "pv": f.pv,
+                "nominal": f.nominal * vna_scale,
+                "pv": f.pv * vna_scale,
                 "peso": f.peso,
                 "krd": f.krd,
             })
@@ -300,9 +303,10 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
             tax_dir = "Compra taxa" if leg["direction"] == "C" else "Vende taxa"
 
         venc = parsed["date"]
-        pu_val = pu(leg["instrument"], leg["taxa"], du_val, dc_val, liq, venc)
+        leg_vna = leg.get("vna")
+        pu_val = pu(leg["instrument"], leg["taxa"], du_val, dc_val, liq, venc, vna=leg_vna)
         dur = duration(leg["instrument"], leg["taxa"], du_val, dc_val, liq, venc)
-        dv = dv01(leg["instrument"], leg["taxa"], du_val, dc_val, leg["quantity"], liq, venc)
+        dv = dv01(leg["instrument"], leg["taxa"], du_val, dc_val, leg["quantity"], liq, venc, vna=leg_vna)
         fin = pu_val * leg["quantity"]
         noc = leg["quantity"] * info.face
         exp = get_exposure(leg["instrument"], leg["direction"], leg["taxa"])
@@ -318,7 +322,7 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
                 if leg["direction"] == "C"
                 else leg["taxa"] + corr_value
             )
-            corr_brl = abs(pu(leg["instrument"], tax_fin, du_val, dc_val, liq, venc) - pu_val) * leg["quantity"]
+            corr_brl = abs(pu(leg["instrument"], tax_fin, du_val, dc_val, liq, venc, vna=leg_vna) - pu_val) * leg["quantity"]
             corr_bps = corr_value * 100
         elif corr_type in ("R$/contrato", "R$/titulo"):
             corr_brl = corr_value * leg["quantity"]
@@ -332,6 +336,7 @@ def _process_raw_legs(legs_input: list[dict], data_neg_str: str, spot: float) ->
             "taxa": leg["taxa"],
             "corr_type": corr_type,
             "corr_value": corr_value,
+            "vna": leg_vna,
             "info": info,
             "parsed": parsed,
             "du": du_val,
@@ -392,6 +397,7 @@ class LegInput(BaseModel):
     taxa: float
     corr_type: str = "Nenhuma"
     corr_value: float = 0.0
+    vna: float | None = None
 
 
 class ProcessRequest(BaseModel):
@@ -665,7 +671,7 @@ def get_tickers(instrument: str):
 # 12. POST /mtm-table
 # ---------------------------------------------------------------------------
 
-_MTM_STEPS = [0, 1, 2, 5, 10, 15, 20]
+_MTM_STEPS = [-20, -15, -10, -5, -2, -1, 0, 1, 2, 5, 10, 15, 20]
 
 
 def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
@@ -681,16 +687,21 @@ def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
 
     sign = 1 if leg["direction"] == "C" else -1
     base_rate = leg["tax_fin"]
+
+    leg_delta = calc_scenario_delta(
+        leg["du"], du_min, du_max, req.scenario_key, req.magnitude,
+        req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+    )
+    inst = leg.get("instrument", "")
+    if inst in ("NTN-B",) and req.delta_ipca_bps != 0:
+        leg_delta = req.delta_ipca_bps
+
+    old_rate = base_rate / 100
+    new_rate = (base_rate + leg_delta / 100) / 100
+
     rows = []
     total = 0.0
     for f in flows:
-        delta = calc_scenario_delta(
-            f["du"], du_min, du_max, req.scenario_key, req.magnitude,
-            req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
-        )
-        effective_delta = req.delta_ipca_bps if leg["instrument"] == "NTN-B" and req.delta_ipca_bps != 0 else delta
-        old_rate = base_rate / 100
-        new_rate = (base_rate + effective_delta / 100) / 100
         t = f["du"] / 252
         old_pv = f["nominal"] / (1 + old_rate) ** t
         new_pv = f["nominal"] / (1 + new_rate) ** t
@@ -702,7 +713,7 @@ def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,
             "du": f["du"],
             "nominal": f["nominal"],
             "pv": old_pv,
-            "delta_bps": effective_delta,
+            "delta_bps": leg_delta,
             "pnl": round(pnl, 2),
         })
 

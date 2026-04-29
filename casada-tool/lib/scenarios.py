@@ -63,16 +63,18 @@ class BearFlattener(ScenarioDefinition):
         return a - a * ((t + 1) / 2)
 
 class PositiveButterfly(ScenarioDefinition):
-    """Barriga sobe, pontas caem. Pressao no miolo da curva."""
+    """Barriga sobe, pontas caem. Pressao no miolo da curva.
+    Mean-zero: integral de -1 a 1 = 0 (sem bias direcional)."""
     def delta(self, t, mag):
         a = abs(mag)
-        return a * (1 - t * t) - a * 0.5
+        return a * (0.5 - 1.5 * t * t)
 
 class NegativeButterfly(ScenarioDefinition):
-    """Barriga cai, pontas sobem. Demanda pelo belly."""
+    """Barriga cai, pontas sobem. Demanda pelo belly.
+    Mean-zero: integral de -1 a 1 = 0 (sem bias direcional)."""
     def delta(self, t, mag):
         a = abs(mag)
-        return -a * (1 - t * t) + a * 0.5
+        return a * (1.5 * t * t - 0.5)
 
 class CustomScenario(ScenarioDefinition):
     """Cenario customizado com 3 componentes independentes."""
@@ -116,9 +118,13 @@ def calc_scenario_delta(du: int, du_min: int, du_max: int,
     du_mid = (du_min + du_max) / 2
     du_range = (du_max - du_min) / 2 or 1
     t = max(-1, min(1, (du - du_mid) / du_range))
+
+    if du_min == du_max and scenario_key in ("pos_fly", "neg_fly"):
+        return 0.0
+
     if scenario_key == "custom":
         scale = magnitude / 10 if magnitude else 0
-        return scale * (custom_parallel_bps + custom_slope_bps * t - custom_curvature_bps * (1 - t * t))
+        return scale * (custom_parallel_bps + custom_slope_bps * t + custom_curvature_bps * (0.5 - 1.5 * t * t))
     sc = SCENARIOS.get(scenario_key)
     return sc.delta(t, magnitude) if sc else 0
 
@@ -172,8 +178,9 @@ def calc_leg_pnl(leg: dict, delta_bps: float,
     new_rate = leg["tax_fin"] + effective_delta / 100
     liq = _parse_leg_date(leg.get("liq"))
     venc = leg.get("parsed", {}).get("date") if isinstance(leg.get("parsed"), dict) else None
-    new_pu = pu(leg["instrument"], new_rate, leg["du"], leg["dc"], liq, venc)
-    old_pu = pu(leg["instrument"], leg["tax_fin"], leg["du"], leg["dc"], liq, venc)
+    leg_vna = leg.get("vna")
+    new_pu = pu(leg["instrument"], new_rate, leg["du"], leg["dc"], liq, venc, vna=leg_vna)
+    old_pu = pu(leg["instrument"], leg["tax_fin"], leg["du"], leg["dc"], liq, venc, vna=leg_vna)
     diff = new_pu - old_pu
 
     if info.type == "tpf":

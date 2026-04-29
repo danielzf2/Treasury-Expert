@@ -86,13 +86,15 @@ function switchTab(tab) {
 
 function renderLegs() {
     const hdr = document.getElementById("legsHeader");
-    hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","Liquidação","Corretagem","Valor",""].map(
+    hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","VNA","Corretagem","Valor",""].map(
         h => `<div style="color:#8b949e;font-size:10px;text-transform:uppercase;letter-spacing:.3px">${h}</div>`
     ).join("");
 
     const c = document.getElementById("legsContainer");
     c.innerHTML = state.legs.map((leg, i) => {
         const isPrice = ["DOL"].includes(leg.instrument);
+        const isNTNB = leg.instrument === "NTN-B";
+        const vnaVal = leg.vna || "";
         return `<div class="leg-row">
             <div><select onchange="updateLeg(${i},'instrument',this.value)">${ALL_INSTRUMENTS.map(inst =>
                 `<option ${inst===leg.instrument?"selected":""}>${inst}</option>`).join("")}</select></div>
@@ -102,7 +104,7 @@ function renderLegs() {
                 <option value="V" ${leg.direction==="V"?"selected":""}>Venda</option></select></div>
             <div><input type="number" value="${leg.quantity}" onchange="updateLeg(${i},'quantity',+this.value)"></div>
             <div><input type="number" value="${leg.taxa}" step="0.005" onchange="updateLeg(${i},'taxa',+this.value)"></div>
-            <div><input type="date" value="${document.getElementById('dataNeg').value}" onchange="updateLeg(${i},'data_liq',this.value)"></div>
+            <div>${isNTNB ? `<input type="number" value="${vnaVal}" step="0.01" placeholder="VNA" onchange="updateLeg(${i},'vna',+this.value||null)">` : `<span class="muted" style="font-size:10px">—</span>`}</div>
             <div><select onchange="updateLeg(${i},'corr_type',this.value)">${CORR_TYPES.map(ct =>
                 `<option ${ct===leg.corr_type?"selected":""}>${ct}</option>`).join("")}</select></div>
             <div><input type="number" value="${leg.corr_value}" step="0.001" onchange="updateLeg(${i},'corr_value',+this.value)"></div>

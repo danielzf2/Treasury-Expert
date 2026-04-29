@@ -81,8 +81,19 @@ def _coupon_cashflows(instrumento: str, liq_date: date | None,
     return flows
 
 
+def cotacao_ntnb(taxa: float, du: int,
+                 liq_date: date | None = None, venc_date: date | None = None) -> float:
+    """Cotacao da NTN-B em % do VNA (face_calc=100)."""
+    r = taxa / 100
+    total = 0.0
+    for _, dui, flow in _coupon_cashflows("NTN-B", liq_date, venc_date, du):
+        total += flow / (1 + r) ** (dui / 252)
+    return total
+
+
 def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
-       liq_date: date | None = None, venc_date: date | None = None) -> float:
+       liq_date: date | None = None, venc_date: date | None = None,
+       vna: float | None = None) -> float:
     """Calcula o PU de qualquer instrumento.
 
     Args:
@@ -90,12 +101,14 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
         taxa: taxa em % a.a. (ou cotacao em R$/1000USD para DOL)
         du: dias uteis ate o vencimento
         dc: dias corridos ate o vencimento (usado para lin360)
+        vna: VNA da NTN-B (truncado 6 casas). Se fornecido, PU = cotacao/100 * VNA.
 
     Formulas:
         LTN/DI1/DAP/LFT:  PU = Face / (1 + taxa/100)^(du/252)
         NTN-F:             PU = Sum[Cup_sem * VN / (1+TIR)^(dui/252)] + VN/(1+TIR)^(dun/252)
                            Cup_sem = (1.10)^0.5 - 1 = 4.880885%
         NTN-B:             Cotacao(%) = Sum[Cup% / (1+TIR)^(dui/252)] + 100/(1+TIR)^(dun/252)
+                           PU = (Cotacao / 100) * VNA
                            Cup_sem = (1.06)^0.5 - 1 = 2.956301%
         DDI:               PU = 100000 / (1 + taxa/100 * DC/360)
         FRC:               PU = 50000 / (1 + taxa/100 * DC/360)
@@ -112,6 +125,12 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
 
     if info.cup_sem == 0:
         return info.face / (1 + r) ** (du / 252)
+
+    if instrumento == "NTN-B":
+        cot = cotacao_ntnb(taxa, du, liq_date, venc_date)
+        if vna is not None and vna > 0:
+            return (cot / 100) * vna
+        return cot
 
     total = 0.0
     for _, dui, flow in _coupon_cashflows(instrumento, liq_date, venc_date, du):
@@ -178,7 +197,8 @@ class DV01Result:
 
 
 def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int,
-         liq_date: date | None = None, venc_date: date | None = None) -> DV01Result:
+         liq_date: date | None = None, venc_date: date | None = None,
+         vna: float | None = None) -> DV01Result:
     """DV01 — variacao de valor para 1 bp na taxa.
 
     Formula:
@@ -192,7 +212,7 @@ def dv01(instrumento: str, taxa: float, du: int, dc: int, quantidade: int,
         return DV01Result(info.mult, info.mult * quantidade)
 
     dur = duration(instrumento, taxa, du, dc, liq_date, venc_date)
-    pu_mkt = pu(instrumento, taxa, du, dc, liq_date, venc_date)
+    pu_mkt = pu(instrumento, taxa, du, dc, liq_date, venc_date, vna=vna)
 
     unit = dur.modificada * pu_mkt * 0.0001
     return DV01Result(unit, unit * quantidade)

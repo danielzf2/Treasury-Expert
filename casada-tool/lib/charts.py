@@ -303,7 +303,7 @@ def chart_pnl_consolidado(legs: list[dict],
                            custom_parallel_bps: float = 0.0,
                            custom_slope_bps: float = 0.0,
                            custom_curvature_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(0, 21))
+    deltas_range = list(range(-20, 21))
     du_min, du_max = _rate_du_range(legs)
     total_pnl = []
     for d in deltas_range:
@@ -324,7 +324,7 @@ def chart_pnl_consolidado(legs: list[dict],
     fig = go.Figure(go.Bar(x=deltas_range, y=total_pnl, marker_color=colors))
     fig.update_layout(
         **_base_layout("P&L Consolidado — Cenário Selecionado", 350),
-        xaxis=dict(title="Magnitude do cenário (bps)", dtick=5, gridcolor=_GRID),
+        xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),
         yaxis=dict(
             title="P&L (R$)", zeroline=True,
             zerolinecolor=_ZERO, gridcolor=_GRID),
@@ -342,7 +342,7 @@ def chart_pnl_por_perna(legs: list[dict],
                          custom_parallel_bps: float = 0.0,
                          custom_slope_bps: float = 0.0,
                          custom_curvature_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(0, 21))
+    deltas_range = list(range(-20, 21))
     du_min, du_max = _rate_du_range(legs)
     fig = go.Figure()
     for i, l in enumerate(legs):
@@ -372,7 +372,7 @@ def chart_pnl_por_perna(legs: list[dict],
         ))
     fig.update_layout(
         **_base_layout("P&L por Perna — Cenário Selecionado", 350),
-        xaxis=dict(title="Magnitude do cenário (bps)", dtick=5, gridcolor=_GRID),
+        xaxis=dict(title="Delta (bps)", dtick=5, gridcolor=_GRID),
         yaxis=dict(
             title="P&L (R$)", zeroline=True,
             zerolinecolor=_ZERO, gridcolor=_GRID),
