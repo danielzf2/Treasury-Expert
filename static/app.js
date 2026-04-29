@@ -477,14 +477,14 @@ function renderAvTable(r) {
     const userLegs = r.legs.filter(l => !l.auto);
     const aggregateAuto = autoLegs.length >= 3;
 
-    let html = '<div class="av-wrap"><table class="sim-tbl"><tr><th></th><th>Instrumento</th><th class="tc">Ativo</th><th class="tc">Passivo</th><th class="tc">Vcto</th></tr>';
+    let html = '<div class="av-wrap"><table class="sim-tbl"><tr><th></th><th>Instrumento</th><th class="tc av-col-ativo">Ativo</th><th class="tc av-col-passivo">Passivo</th><th class="tc">Vcto</th></tr>';
     userLegs.forEach(l => {
         const isBuy = l.direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
         const dirColor = isBuy ? "#3fb950" : "#f85149";
         html += `<tr><td><span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
-            <td class="bold">${l.instrument}</td><td class="tc mono">${l.exp_ativo}</td>
-            <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
+            <td class="bold">${l.instrument}</td><td class="tc mono av-col-ativo">${l.exp_ativo}</td>
+            <td class="tc mono av-col-passivo">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
     });
     if (aggregateAuto) {
         const isBuy = autoLegs[0].direction === "C";
@@ -507,7 +507,42 @@ function renderAvTable(r) {
                 <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
         });
     }
-    html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
+    // Resultado liquido no formato Ativo | Passivo (como as pernas)
+    const net = r.strategy.net_exposure;
+    if (net) {
+        const ativoEntries = [];
+        const passivoEntries = [];
+
+        for (const c of (net.cancelled || [])) {
+            if (c.spread_bps && c.spread_bps > 0) {
+                ativoEntries.push(`${c.factor} ${(c.ativo_total||0).toFixed(3)}%`);
+                passivoEntries.push(`${c.factor} ${(c.passivo_total||0).toFixed(3)}%`);
+            } else if (c.spread_bps && c.spread_bps < 0) {
+                ativoEntries.push(`${c.factor} ${(c.ativo_total||0).toFixed(3)}%`);
+                passivoEntries.push(`${c.factor} ${(c.passivo_total||0).toFixed(3)}%`);
+            } else {
+                ativoEntries.push(c.factor);
+                passivoEntries.push(c.factor);
+            }
+        }
+        for (const re of (net.residual || [])) {
+            const rateStr = re.rate_total != null ? ` ${re.rate_total.toFixed(3)}%` : "";
+            if (re.side === "ativo") ativoEntries.push(`${re.factor}${rateStr}`);
+            else passivoEntries.push(`${re.factor}${rateStr}`);
+        }
+
+        const ativoStr = ativoEntries.length ? ativoEntries.join(" + ") : "—";
+        const passivoStr = passivoEntries.length ? passivoEntries.join(" + ") : "—";
+
+        html += `<tr class="av-net-result">
+            <td colspan="2" style="text-align:right;font-weight:600;color:#8b949e;font-size:11px;padding-right:8px">RESULTADO</td>
+            <td class="tc mono av-net-ativo">${ativoStr}</td>
+            <td class="tc mono av-net-passivo">${passivoStr}</td>
+            <td></td></tr>`;
+        html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
+    } else {
+        html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
+    }
     if (r.strategy.economic_description) {
         const name = r.strategy.name ? `<span style="color:#58a6ff;font-weight:600">${r.strategy.name}</span> — ` : "";
         html += `<tr class="av-econ"><td colspan="5" style="padding:8px 12px;font-size:11.5px;line-height:1.5;color:#8b949e;border-top:1px dashed rgba(100,100,100,0.2)">${name}${r.strategy.economic_description}</td></tr>`;

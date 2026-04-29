@@ -424,6 +424,33 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
 .av-result td.tr { text-align: right !important; }
 .av-result td.tc { text-align: center !important; }
 
+/* Colunas Ativo | Passivo com borda vertical separadora */
+.av-col-ativo {
+    border-left: 2px solid rgba(88,166,255,0.25) !important;
+    border-right: 2px solid #58a6ff !important;
+}
+.av-col-passivo {
+    border-right: 2px solid rgba(88,166,255,0.25) !important;
+}
+
+/* Resultado liquido (linha RESULTADO) */
+.av-net-result td {
+    border-top: 2px dashed rgba(88,166,255,0.3) !important;
+    padding: 8px 16px !important;
+}
+.av-net-ativo, .av-net-passivo {
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    color: #e6edf3 !important;
+}
+.av-net-ativo {
+    border-left: 2px solid rgba(88,166,255,0.25) !important;
+    border-right: 2px solid #58a6ff !important;
+}
+.av-net-passivo {
+    border-right: 2px solid rgba(88,166,255,0.25) !important;
+}
+
 /* Utility classes */
 .mono { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 .tc { text-align: center; }

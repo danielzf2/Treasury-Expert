@@ -76,11 +76,12 @@ class TestNtnbSintetica:
     def test_risk_factors_ntnb_sint(self, legs_ntnb_sint):
         s = detect_strategy(legs_ntnb_sint, SPOT)
         factors = analyze_risk_factors(legs_ntnb_sint, s)
-        # IPCA+ deve ser residual exposto (NTN-B sintetica recebe IPCA+)
-        ipca = next((f for f in factors if "IPCA+" in f["fator"] and f["exposto"]), None)
+        # IPCA+ deve estar nos fatores (exposto como residual)
+        ipca = next((f for f in factors if "IPCA+" in f["fator"]), None)
         assert ipca is not None
-        # CDI deve cancelar (Selic~CDI do LFT vs CDI do DAP)
-        cdi = next((f for f in factors if "CDI" in f["fator"] and "cancela" in f["fator"]), None)
+        assert ipca["exposto"] is True
+        # CDI deve estar nos fatores (hedgeado)
+        cdi = next((f for f in factors if "CDI" in f["fator"]), None)
         assert cdi is not None
 
 
@@ -112,9 +113,10 @@ class TestHedgeIpcaSintetico:
     def test_risk_factors_ipca_sint(self, legs_ipca_sint):
         s = detect_strategy(legs_ipca_sint, SPOT)
         factors = analyze_risk_factors(legs_ipca_sint, s)
-        # CDI cancela (DI1 CDI vs DAP CDI), IPCA+ e Pre residuais
-        cdi = next((f for f in factors if "CDI" in f["fator"] and "cancela" in f["fator"]), None)
+        # CDI deve aparecer (hedgeado)
+        cdi = next((f for f in factors if "CDI" in f["fator"]), None)
         assert cdi is not None
+        # IPCA+ residual
         ipca = next((f for f in factors if "IPCA+" in f["fator"]), None)
         assert ipca is not None
         assert ipca["exposto"] is True

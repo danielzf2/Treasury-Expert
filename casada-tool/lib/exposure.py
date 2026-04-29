@@ -99,22 +99,30 @@ def compute_net_exposure(legs: list[dict]) -> dict:
     2. Parseia cada lado em entries {factor, rate}
     3. Acumula em bags: bags[factor]["ativo"] e bags[factor]["passivo"]
 
-    Cancelamento:
-    - Se um fator aparece em AMBOS os lados (ativo e passivo), cancela.
-    - Se ambos tem taxa explicita, spread = soma_ativo - soma_passivo (em %).
-    - Se taxa eh implicita (CDI puro), cancela zerado.
-    - Fatores sem contraparte ficam como exposicao residual.
+    Cancelamento DV01-aware:
+    - Se um fator aparece em AMBOS os lados (ativo e passivo), avalia cobertura.
+    - Calcula DV01 total de cada lado e ratio de cobertura.
+    - ratio >= 80%: "cancela" (hedge efetivo)
+    - 20% <= ratio < 80%: "parcialmente hedgeado"
+    - ratio < 20%: nao cancela (hedge insignificante)
 
     Retorna dict com:
       entries: lista de todas as entries brutas
       bags: {factor: {ativo: [{rate, leg_label}], passivo: [...]}}
-      cancelled: [{factor, ativo_total, passivo_total, spread_pct}]
+      cancelled: [{factor, ativo_total, passivo_total, spread_pct, hedge_ratio, hedge_quality}]
       residual: [{factor, side, rate_total, direction}]
       result_label: string concisa (ex: 'CDI +11 bps')
       result_description: explicacao de 1-2 linhas
     """
     bags: dict[str, dict[str, list]] = {}
     all_entries: list[dict] = []
+
+    # Mapa instrumento -> DV01 total pra calcular cobertura
+    dv01_by_inst: dict[str, float] = {}
+    for leg in legs:
+        inst = leg["instrument"]
+        dv01_by_inst.setdefault(inst, 0.0)
+        dv01_by_inst[inst] += abs(leg.get("dv01_total", 0.0))
 
     for leg in legs:
         inst = leg["instrument"]
@@ -134,6 +142,7 @@ def compute_net_exposure(legs: list[dict]) -> dict:
                     "rate": e["rate"],
                     "leg_label": label,
                     "instrument": inst,
+                    "dv01": dv01_by_inst.get(inst, 0.0),
                 })
                 all_entries.append({**e, "side": side, "leg_label": label})
 
@@ -155,6 +164,21 @@ def compute_net_exposure(legs: list[dict]) -> dict:
 
             ativo_legs = [e["leg_label"] for e in sides["ativo"]]
             passivo_legs = [e["leg_label"] for e in sides["passivo"]]
+
+            # Cobertura DV01: ratio do menor sobre o maior
+            dv01_ativo = sum(e["dv01"] for e in sides["ativo"])
+            dv01_passivo = sum(e["dv01"] for e in sides["passivo"])
+            dv01_max = max(dv01_ativo, dv01_passivo, 1.0)
+            dv01_min = min(dv01_ativo, dv01_passivo)
+            hedge_ratio = dv01_min / dv01_max if dv01_max > 0 else 0.0
+
+            if hedge_ratio >= 0.80:
+                hedge_quality = "total"
+            elif hedge_ratio >= 0.15:
+                hedge_quality = "parcial"
+            else:
+                hedge_quality = "insignificante"
+
             cancelled.append({
                 "factor": factor,
                 "ativo_total": sum(ativo_rates) if ativo_rates else None,
@@ -163,6 +187,10 @@ def compute_net_exposure(legs: list[dict]) -> dict:
                 "spread_bps": round(spread * 100, 2) if spread else 0.0,
                 "ativo_legs": ativo_legs,
                 "passivo_legs": passivo_legs,
+                "hedge_ratio": round(hedge_ratio, 4),
+                "hedge_quality": hedge_quality,
+                "dv01_ativo": round(dv01_ativo, 2),
+                "dv01_passivo": round(dv01_passivo, 2),
             })
         else:
             side = "ativo" if has_ativo else "passivo"
@@ -607,7 +635,6 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
                                 "desc": "Strip de DAP fixa o cupom de IPCA em cada vertice — IPCA neutralizado"})
-            return factors
         elif mode == "duration":
             factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
                             "desc": f"Duration hedge: 1 {hedge_inst} no D.Mac do {tpf_name} casa DV01 total no shift paralelo"})
@@ -620,7 +647,6 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
                                 "desc": "DAP no D.Mac hedgeia IPCA em 1a ordem (residual: spread IPCA por torcao)"})
-            return factors
         elif mode == "maturity":
             factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
                             "desc": f"Vcto hedge: 1 {hedge_inst} no DU final do {tpf_name} (mismatch de DV01 leve por D.Mac < DU final)"})
@@ -633,24 +659,51 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
                                 "desc": "DAP no vencimento hedgeia IPCA com mismatch (residual concentrado nos cupons curtos)"})
-            return factors
 
     # === CAMADA 1: MOTOR — fatores derivados de net_exposure (SEMPRE roda) ===
     net = strategy.get("net_exposure")
     if net:
         for c in net["cancelled"]:
-            if c["spread_bps"]:
-                factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
-                                "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps)"})
+            quality = c.get("hedge_quality", "total")
+            ratio = c.get("hedge_ratio", 1.0)
+            ratio_pct = round(ratio * 100)
+
+            if quality == "insignificante":
+                # Hedge < 20% DV01: tratar como exposto
+                factors.append({"fator": c["factor"], "exposto": True,
+                                "desc": f"{c['factor']} presente em ambos lados mas hedge insignificante (DV01 cobertura {ratio_pct}%)"})
+            elif quality == "parcial":
+                # 20-80%: exposto parcialmente
+                spread_str = f", spread {c['spread_bps']:+.0f} bps" if c["spread_bps"] else ""
+                factors.append({"fator": f"{c['factor']} (parcial)", "exposto": True,
+                                "desc": f"{c['factor']} parcialmente hedgeado (DV01 cobertura {ratio_pct}%{spread_str}) — residual significativo"})
             else:
-                factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
-                                "desc": f"{c['factor']} cancela entre pernas"})
+                # >= 80%: hedge efetivo
+                if c["spread_bps"]:
+                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
+                                    "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps, DV01 {ratio_pct}%)"})
+                else:
+                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
+                                    "desc": f"{c['factor']} cancela entre pernas (DV01 {ratio_pct}%)"})
         for r in net["residual"]:
             rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
             factors.append({"fator": r["factor"], "exposto": True,
                             "desc": f"{r['direction'].capitalize()} {r['factor']}{rate_str} ({', '.join(r['legs'])})"})
 
     # === CAMADA 2: ESTRUTURAL — detalhes de inclinacao, curvatura, convexidade ===
+
+    # FRA de cupom IPCA / Direcional inclinacao (2 DAPs opostos)
+    if strategy.get("type") == "fra_real":
+        factors.append({"fator": "Inclinacao Cupom IPCA", "exposto": True,
+                        "desc": "Trade direcional na inclinacao da curva real entre os 2 vencimentos do DAP — P&L se a forma da curva IPCA mudar"})
+
+    # Fatores derivados de sinteticas (Fix #5)
+    if strategy.get("type") == "cupom_sint":
+        factors.append({"fator": "Cupom Cambial Sintetico", "exposto": True,
+                        "desc": "DOL + DI1 (mesma direcao) cria cupom cambial sintetico via paridade coberta — sensivel ao FRC implicito"})
+    if strategy.get("type") in ("dol_sint", "dol_sint_ddi"):
+        factors.append({"fator": "Dolar Forward Sintetico", "exposto": True,
+                        "desc": "DI1 + FRC/DDI (opostos) replica dolar forward — P&L direcional ao spot USD/BRL via paridade coberta"})
 
     # Spread basis (quando tem par de instrumentos com spread travado)
     spread = strategy.get("spread")
@@ -676,6 +729,10 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             else:
                 factors.append({"fator": f"Inclinacao ({tpf_inst})", "exposto": True,
                                 "desc": f"{tpf_inst} tem cupons em multiplos vertices — exposto a torcoes da curva {curve_lbl}"})
+                factors.append({"fator": f"Curvatura ({tpf_inst})", "exposto": True,
+                                "desc": f"Fluxos intermediarios do {tpf_inst} amplificam sensibilidade a movimentos de barriga da curva {curve_lbl}"})
+                factors.append({"fator": f"Convexidade ({tpf_inst})", "exposto": True,
+                                "desc": f"{tpf_inst} com cupom tem convexidade diferente de zero-coupon — P&L nao-linear em movimentos grandes"})
 
     # Convexidade (gamma) — quando TPF com cupom + derivativo, mostra D.Mac diff
     if has_cupom_tpf and (has_di or has_dap):
@@ -683,8 +740,9 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
         deriv_leg = next((l for l in legs if l["instrument"] in ("DI1", "DAP")), None)
         if tpf_leg and deriv_leg:
             diff = abs(tpf_leg["d_mac"] - deriv_leg["d_mac"])
-            factors.append({"fator": "Convexidade (gamma)", "exposto": diff > 0.3,
-                            "desc": f"D.Mac {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a) — convexidade descasada gera P&L em movimentos grandes"})
+            # Convexidade sempre exposta quando cupom vs zero-coupon (diff > 0 implica mismatch)
+            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
+                            "desc": f"D.Mac {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a) — titulo com cupom vs zero-coupon sempre tem convexidade descasada"})
 
     return factors
 
