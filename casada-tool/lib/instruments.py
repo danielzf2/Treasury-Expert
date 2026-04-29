@@ -104,7 +104,10 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
         vna: VNA da NTN-B (truncado 6 casas). Se fornecido, PU = cotacao/100 * VNA.
 
     Formulas:
-        LTN/DI1/DAP/LFT:  PU = Face / (1 + taxa/100)^(du/252)
+        LTN/DI1/DAP:       PU = Face / (1 + taxa/100)^(du/252)
+        LFT:               Cotacao(%) = 100 / (1 + taxa/100)^(du/252)
+                           PU = (Cotacao / 100) * VNA_Selic  (se vna fornecido)
+                           Sem VNA: PU = Face / (1 + taxa/100)^(du/252) (aprox)
         NTN-F:             PU = Sum[Cup_sem * VN / (1+TIR)^(dui/252)] + VN/(1+TIR)^(dun/252)
                            Cup_sem = (1.10)^0.5 - 1 = 4.880885%
         NTN-B:             Cotacao(%) = Sum[Cup% / (1+TIR)^(dui/252)] + 100/(1+TIR)^(dun/252)
@@ -122,6 +125,13 @@ def pu(instrumento: str, taxa: float, du: int, dc: int = 0,
 
     if info.conv == "lin360":
         return info.face / (1 + r * dc / 360)
+
+    # LFT: Cotacao = 100 / (1+r)^(du/252); PU = (Cotacao/100) * VNA_Selic
+    if instrumento == "LFT":
+        cotacao_pct = 100.0 / (1 + r) ** (du / 252)
+        if vna is not None and vna > 0:
+            return (cotacao_pct / 100.0) * vna
+        return info.face / (1 + r) ** (du / 252)
 
     if info.cup_sem == 0:
         return info.face / (1 + r) ** (du / 252)

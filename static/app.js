@@ -154,6 +154,8 @@ function renderLegs() {
     const c = document.getElementById("legsContainer");
     c.innerHTML = state.legs.map((leg, i) => {
         const isNTNB = leg.instrument === "NTN-B";
+        const isLFT = leg.instrument === "LFT";
+        const hasVNA = isNTNB || isLFT;
         const isCoupon = leg.instrument === "NTN-F" || leg.instrument === "NTN-B";
         const vnaVal = leg.vna || "";
         const hedgeMode = leg.hedge_mode || "manual";
@@ -172,7 +174,7 @@ function renderLegs() {
                 <option value="V" ${leg.direction==="V"?"selected":""}>Venda</option></select></div>
             <div><input type="number" value="${leg.quantity}" onchange="updateLeg(${i},'quantity',+this.value)"></div>
             <div><input type="number" value="${leg.taxa}" step="0.005" onchange="updateLeg(${i},'taxa',+this.value)"></div>
-            <div>${isNTNB ? `<input type="number" value="${vnaVal}" step="0.01" placeholder="VNA" onchange="updateLeg(${i},'vna',+this.value||null)">` : `<span class="muted" style="font-size:10px">—</span>`}</div>
+            <div>${hasVNA ? `<input type="number" value="${vnaVal}" step="0.01" placeholder="VNA" onchange="updateLeg(${i},'vna',+this.value||null)">` : `<span class="muted" style="font-size:10px">—</span>`}</div>
             <div>${isCoupon && !isAuto ? `<select onchange="changeHedgeMode(${i},this.value)">${HEDGE_MODES.map(h =>
                 `<option value="${h.v}" ${h.v===hedgeMode?"selected":""}>${h.l}</option>`).join("")}</select>` : `<span class="muted" style="font-size:10px">—</span>`}</div>
             <div><select onchange="updateLeg(${i},'corr_type',this.value)">${CORR_TYPES.map(ct =>
@@ -230,6 +232,11 @@ async function changeInstrument(i, inst) {
         if (!state.legs[i].vna || state.legs[i].vna === 4500.0) {
             state.legs[i].vna = vnaFromFeed && vnaFromFeed > 0 ? vnaFromFeed : 4500.0;
         }
+    } else if (inst === "LFT") {
+        const vnaFromFeed = state.vnaData?.vna_lft;
+        state.legs[i].vna = vnaFromFeed && vnaFromFeed > 0 ? vnaFromFeed : null;
+    } else {
+        state.legs[i].vna = null;
     }
     const tickers = await fetchTickers(inst);
     if (tickers.length) state.legs[i].ticker = tickers[0];

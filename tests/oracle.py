@@ -394,7 +394,12 @@ def _pu_for_leg(instrumento: str, taxa: float, du: int, dc: int,
     if instrumento == "NTN-B":
         return pu_ntnb_float(taxa, vna or 100.0, liq, venc)
     if instrumento == "LFT":
-        return pu_ltn_float(taxa, du) * (vna / 1000.0 if vna else 1.0)
+        # LFT: cotacao = 100 / (1+r)^(du/252); PU = cotacao/100 * VNA_Selic
+        r = taxa / 100.0
+        cotacao_pct = 100.0 / (1.0 + r) ** (du / 252.0)
+        if vna and vna > 0:
+            return (cotacao_pct / 100.0) * vna
+        return VN_TPF / (1.0 + r) ** (du / 252.0)  # fallback face=1000
     if instrumento in ("DI1", "DAP"):
         return pu_di1(taxa, du)
     if instrumento in ("DDI",):
