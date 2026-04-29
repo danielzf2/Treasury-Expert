@@ -84,6 +84,18 @@ function switchTab(tab) {
     document.getElementById("tab-formulas").style.display = tab === "formulas" ? "" : "none";
 }
 
+const _tickerCache = {};
+
+async function fetchTickers(instrument) {
+    if (_tickerCache[instrument]) return _tickerCache[instrument];
+    try {
+        const resp = await fetch(`/sim/tickers/${instrument}`);
+        const data = await resp.json();
+        _tickerCache[instrument] = data.tickers || [];
+        return _tickerCache[instrument];
+    } catch(e) { return []; }
+}
+
 function renderLegs() {
     const hdr = document.getElementById("legsHeader");
     hdr.innerHTML = ["Instrumento","Ticker","C/V","Qtd","Taxa (%)","VNA","Corretagem","Valor",""].map(
@@ -92,13 +104,13 @@ function renderLegs() {
 
     const c = document.getElementById("legsContainer");
     c.innerHTML = state.legs.map((leg, i) => {
-        const isPrice = ["DOL"].includes(leg.instrument);
         const isNTNB = leg.instrument === "NTN-B";
         const vnaVal = leg.vna || "";
         return `<div class="leg-row">
-            <div><select onchange="updateLeg(${i},'instrument',this.value)">${ALL_INSTRUMENTS.map(inst =>
+            <div><select onchange="changeInstrument(${i},this.value)">${ALL_INSTRUMENTS.map(inst =>
                 `<option ${inst===leg.instrument?"selected":""}>${inst}</option>`).join("")}</select></div>
-            <div><input value="${leg.ticker}" onchange="updateLeg(${i},'ticker',this.value)" style="text-transform:uppercase"></div>
+            <div><select id="ticker_${i}" onchange="updateLeg(${i},'ticker',this.value)">
+                <option value="${leg.ticker}">${leg.ticker}</option></select></div>
             <div><select onchange="updateLeg(${i},'direction',this.value)">
                 <option value="C" ${leg.direction==="C"?"selected":""}>Compra</option>
                 <option value="V" ${leg.direction==="V"?"selected":""}>Venda</option></select></div>
@@ -111,6 +123,33 @@ function renderLegs() {
             <div>${state.legs.length > 1 ? `<button class="btn-remove" onclick="removeLeg(${i})">✕</button>` : ""}</div>
         </div>`;
     }).join("");
+
+    state.legs.forEach((leg, i) => populateTickerSelect(i, leg.instrument, leg.ticker));
+}
+
+async function populateTickerSelect(i, instrument, currentTicker) {
+    const sel = document.getElementById(`ticker_${i}`);
+    if (!sel) return;
+    const tickers = await fetchTickers(instrument);
+    if (!tickers.length) {
+        sel.innerHTML = `<option value="${currentTicker}">${currentTicker}</option>`;
+        return;
+    }
+    const found = tickers.includes(currentTicker);
+    sel.innerHTML = tickers.map(t =>
+        `<option value="${t}" ${t === currentTicker ? "selected" : ""}>${t}</option>`
+    ).join("");
+    if (!found && currentTicker) {
+        sel.insertAdjacentHTML("afterbegin", `<option value="${currentTicker}" selected>${currentTicker}</option>`);
+    }
+}
+
+async function changeInstrument(i, inst) {
+    state.legs[i].instrument = inst;
+    const tickers = await fetchTickers(inst);
+    if (tickers.length) state.legs[i].ticker = tickers[0];
+    renderLegs();
+    processLegs();
 }
 
 function updateLeg(i, field, val) {
@@ -137,6 +176,7 @@ async function fetchMarketData() {
         const resp = await fetch("/sim/market-data");
         state.marketData = await resp.json();
         document.getElementById("mktTimestamp").textContent = `Atualizado: ${state.marketData.timestamp}`;
+        Object.keys(_tickerCache).forEach(k => delete _tickerCache[k]);
         renderMarketIndicators();
         renderMarketDataTab();
         updateLegsFromMarket();
