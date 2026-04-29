@@ -478,14 +478,15 @@ function renderAvTable(r) {
     const aggregateAuto = autoLegs.length >= 3;
     const net = r.strategy.net_exposure;
 
-    // Fatores cancelados: usados pra fazer strikethrough nas pernas
+    // Fatores cancelados: strikethrough apenas na PALAVRA do fator, taxa fica visivel
     const cancelledFactors = new Set((net?.cancelled || []).map(c => c.factor));
 
     function markCancelled(text) {
         if (!text || text === "—") return text;
         for (const factor of cancelledFactors) {
             if (text.includes(factor)) {
-                return `<span class="av-cancelled">${text}</span>`;
+                const rest = text.replace(factor, "").trim();
+                return `<span class="av-cancelled">${factor}</span>${rest ? " " + rest : ""}`;
             }
         }
         return text;
@@ -530,7 +531,7 @@ function renderAvTable(r) {
         });
     }
 
-    // Linha RESULTADO: mesma estrutura Ativo | Passivo, sem barra azul separada
+    // Linha RESULTADO: resultado nas colunas Ativo/Passivo
     if (net) {
         const ativoEntries = [];
         const passivoEntries = [];
@@ -541,14 +542,20 @@ function renderAvTable(r) {
             else passivoEntries.push(`${re.factor}${rateStr}`);
         }
 
-        const ativoStr = ativoEntries.length ? ativoEntries.join(" + ") : "—";
-        const passivoStr = passivoEntries.length ? passivoEntries.join(" + ") : "—";
+        // O resultado conciso (CDI +11 bps) vai no lado do resultado liquido
+        const resultText = r.strategy.result || "";
+        let ativoResult = ativoEntries.join(" + ") || "—";
+        let passivoResult = passivoEntries.join(" + ") || "—";
+
+        // Se tem spread (CDI +X bps), coloca no ativo (recebe CDI + spread)
+        if (resultText.startsWith("CDI")) {
+            ativoResult = resultText;
+        }
 
         html += `<tr class="av-result-row">
-            <td style="font-weight:600;color:#58a6ff;font-size:12px">Resultado</td>
-            <td class="mono" style="color:#e6edf3;font-weight:600">${r.strategy.result}</td>
-            <td class="tc mono av-col-ativo" style="font-weight:600;color:#e6edf3">${ativoStr}</td>
-            <td class="tc mono av-col-passivo" style="font-weight:600;color:#e6edf3">${passivoStr}</td>
+            <td colspan="2" style="font-weight:600;color:#58a6ff;font-size:12px">Resultado</td>
+            <td class="tc mono av-col-ativo" style="font-weight:600;color:#e6edf3">${ativoResult}</td>
+            <td class="tc mono av-col-passivo" style="font-weight:600;color:#e6edf3">${passivoResult}</td>
             <td></td></tr>`;
     }
 
