@@ -1084,6 +1084,28 @@ def get_vna():
 # 11c. GET /anbima-tpf - PU oficial ANBIMA dos TPFs (TXT D-1)
 # ---------------------------------------------------------------------------
 
+@router.get("/ettj")
+def get_ettj():
+    """Retorna ETTJ ANBIMA (curva Pre, IPCA, inflação implícita, NSS params).
+
+    Fonte: https://www.anbima.com.br/informacoes/est-termo/CZ-down.asp
+    Cache 30min. Retorna vértices a cada 126 DU (6 meses).
+    """
+    ettj = anbima_fetchers.fetch_ettj()
+    return {
+        "source": "anbima.com.br/est-termo",
+        "data_ref": ettj.data_ref.strftime("%Y-%m-%d") if ettj.data_ref else None,
+        "nss_pre": ettj.nss_pre,
+        "nss_ipca": ettj.nss_ipca,
+        "vertices": [
+            {"du": v.du, "taxa_ipca": v.taxa_ipca, "taxa_pre": v.taxa_pre,
+             "inflacao_implicita": v.inflacao_implicita}
+            for v in ettj.vertices
+        ],
+        "vertices_pre_3361": [{"du": du, "taxa": t} for du, t in ettj.vertices_pre_3361],
+    }
+
+
 @router.get("/anbima-tpf")
 def get_anbima_tpf(instrument: str | None = None):
     """Retorna registros ANBIMA dos titulos publicos.

@@ -408,6 +408,186 @@ def get_anbima_tpf_vencimentos(instrument: str) -> list[str]:
     return [r.data_vencimento.strftime("%Y-%m-%d") for r in grouped.get(instrument, [])]
 
 
+# ============================================================================
+# 3. ETTJ ANBIMA — Estrutura a Termo de Taxas de Juros
+# ============================================================================
+
+ETTJ_URL = "https://www.anbima.com.br/informacoes/est-termo/CZ-down.asp"
+
+
+@dataclass
+class ETTJVertex:
+    """Vertice da ETTJ ANBIMA."""
+    du: int             # dias uteis
+    taxa_ipca: float | None   # % a.a. IPCA (cupom real)
+    taxa_pre: float | None    # % a.a. Pre
+    inflacao_implicita: float | None  # % a.a. breakeven
+
+
+@dataclass
+class ETTJData:
+    """Dados completos da ETTJ ANBIMA."""
+    data_ref: date | None
+    nss_pre: dict  # {beta1, beta2, beta3, beta4, lambda1, lambda2}
+    nss_ipca: dict
+    vertices: list[ETTJVertex]
+    vertices_pre_3361: list[tuple[int, float]]  # verts Circular 3361
+
+
+def parse_ettj(content: str) -> ETTJData:
+    """Parse do arquivo CZ-down.asp da ANBIMA (encoding latin-1, separador ;).
+
+    Layout:
+      Linha 1: DD/MM/YYYY;Beta 1;Beta 2;...
+      Linha 2: PREFIXADOS;b1;b2;b3;b4;l1;l2
+      Linha 3: IPCA;b1;b2;b3;b4;l1;l2
+      Linha 4: (vazia)
+      Linha 5: ETTJ Inflacao Implicita (IPCA)
+      Linha 6: Vertices;ETTJ IPCA;ETTJ PREF;Inflacao Implicita
+      Linhas seguintes: du;ipca;pre;breakeven (ou du;ipca;; se pre nao disponivel)
+      (vazia)
+      PREFIXADOS (CIRCULAR 3.361)
+      Vertices;Taxa (%a.a.)
+      du;taxa
+      ...
+    """
+    lines = content.strip().splitlines()
+    if not lines:
+        return ETTJData(None, {}, {}, [], [])
+
+    # Linha 1: data
+    first_parts = lines[0].split(";")
+    data_ref = _parse_ddmmyyyy(first_parts[0]) if first_parts else None
+
+    # NSS params
+    nss_pre = {}
+    nss_ipca = {}
+    for line in lines[1:4]:
+        parts = line.split(";")
+        if len(parts) < 7:
+            continue
+        label = parts[0].strip().upper()
+        try:
+            params = {
+                "beta1": float(parts[1].replace(",", ".")),
+                "beta2": float(parts[2].replace(",", ".")),
+                "beta3": float(parts[3].replace(",", ".")),
+                "beta4": float(parts[4].replace(",", ".")),
+                "lambda1": float(parts[5].replace(",", ".")),
+                "lambda2": float(parts[6].replace(",", ".")),
+            }
+        except (ValueError, IndexError):
+            continue
+        if "PREFIXADO" in label:
+            nss_pre = params
+        elif "IPCA" in label:
+            nss_ipca = params
+
+    # Vertices ETTJ
+    vertices: list[ETTJVertex] = []
+    in_vertices = False
+    in_3361 = False
+    verts_3361: list[tuple[int, float]] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            in_vertices = False
+            continue
+
+        if "Vertices;ETTJ IPCA" in stripped:
+            in_vertices = True
+            continue
+
+        if "CIRCULAR 3.361" in stripped.upper():
+            in_vertices = False
+            in_3361 = True
+            continue
+
+        if in_3361 and "Vertices;Taxa" in stripped:
+            continue
+
+        if "Erro" in stripped and "Titulo" in stripped:
+            in_3361 = False
+            continue
+
+        if in_vertices:
+            parts = stripped.split(";")
+            if len(parts) < 2:
+                continue
+            try:
+                du = int(parts[0].replace(".", "").strip())
+                ipca = _parse_br_decimal(parts[1]) if parts[1].strip() else None
+                pre = _parse_br_decimal(parts[2]) if len(parts) > 2 and parts[2].strip() else None
+                infl = _parse_br_decimal(parts[3]) if len(parts) > 3 and parts[3].strip() else None
+                vertices.append(ETTJVertex(du=du, taxa_ipca=ipca, taxa_pre=pre, inflacao_implicita=infl))
+            except (ValueError, IndexError):
+                continue
+
+        if in_3361:
+            parts = stripped.split(";")
+            if len(parts) >= 2:
+                try:
+                    du = int(parts[0].replace(".", "").strip())
+                    taxa = _parse_br_decimal(parts[1])
+                    verts_3361.append((du, taxa))
+                except (ValueError, IndexError):
+                    pass
+
+    return ETTJData(
+        data_ref=data_ref,
+        nss_pre=nss_pre,
+        nss_ipca=nss_ipca,
+        vertices=vertices,
+        vertices_pre_3361=verts_3361,
+    )
+
+
+def fetch_ettj() -> ETTJData:
+    """Busca ETTJ ANBIMA (cache 30min). Retorna ETTJData.
+
+    Fonte: https://www.anbima.com.br/informacoes/est-termo/CZ-down.asp
+    Publicado D-1 util apos 18h. Formato latin-1, separador ;.
+    """
+    cache_key = "anbima_ettj"
+    now = time.time()
+    if cache_key in _cache and (now - _cache[cache_key].timestamp) < CACHE_TTL_SECONDS:
+        return _cache[cache_key].data
+
+    body = _http_get(ETTJ_URL, timeout=12,
+                     headers={"User-Agent": "Mozilla/5.0 (compatible; TreasuryExpert/1.0)"})
+    if not body:
+        return ETTJData(None, {}, {}, [], [])
+
+    try:
+        text = body.decode("latin-1")
+    except UnicodeDecodeError:
+        text = body.decode("utf-8", errors="ignore")
+
+    data = parse_ettj(text)
+    if data.vertices:
+        _cache[cache_key] = _CacheEntry(data, now)
+    return data
+
+
+def get_ettj_pre_vertices() -> list[tuple[int, float]]:
+    """Vertices da curva Pre ANBIMA como (du, taxa_aa %). Fallback pra curva B3 quando vazia."""
+    ettj = fetch_ettj()
+    return [(v.du, v.taxa_pre) for v in ettj.vertices if v.taxa_pre is not None]
+
+
+def get_ettj_ipca_vertices() -> list[tuple[int, float]]:
+    """Vertices da curva IPCA (real) ANBIMA como (du, taxa_aa %)."""
+    ettj = fetch_ettj()
+    return [(v.du, v.taxa_ipca) for v in ettj.vertices if v.taxa_ipca is not None]
+
+
+def get_ettj_breakeven_vertices() -> list[tuple[int, float]]:
+    """Inflacao implicita (breakeven) ANBIMA como (du, taxa_aa %)."""
+    ettj = fetch_ettj()
+    return [(v.du, v.inflacao_implicita) for v in ettj.vertices if v.inflacao_implicita is not None]
+
+
 def find_anbima_tpf(instrument: str, vencimento: date) -> TPFRecord | None:
     """Encontra o registro ANBIMA pra um TPF (instrumento + vencimento)."""
     for r in fetch_anbima_tpf_txt():
