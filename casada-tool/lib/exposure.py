@@ -136,6 +136,16 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
     return {"result": " | ".join(descs), "type": "multi"}
 
 
+def _hedge_instrument_for_tpf(tpf_inst: str) -> str:
+    """Derivativo correto de hedge: DAP para NTN-B (curva real); DI1 para LTN/NTN-F (curva pre)."""
+    return "DAP" if tpf_inst == "NTN-B" else "DI1"
+
+
+def _curve_label_for_tpf(tpf_inst: str) -> str:
+    """Curva relevante: 'real (IPCA)' para NTN-B; 'pre' para LTN/NTN-F."""
+    return "real (IPCA)" if tpf_inst == "NTN-B" else "pre"
+
+
 def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     """Analisa quais fatores de risco a operacao esta exposta.
 
@@ -144,20 +154,17 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     - Inclinacao (steepening/flattening)
     - Curvatura (butterfly)
     - Convexidade (gamma)
-    - Spread (basis entre titulo e DI)
+    - Spread (basis entre titulo e DI/DAP)
     - Cambio (USD/BRL)
     - Cupom cambial
     - Inflacao (IPCA)
     """
     factors = []
     insts = {l["instrument"] for l in legs}
-    has_tpf = any(INSTRUMENTS[l["instrument"]].type == "tpf" for l in legs)
     has_cupom_tpf = any(INSTRUMENTS[l["instrument"]].cup_sem > 0 for l in legs)
     has_di = "DI1" in insts
     has_dap = "DAP" in insts
     has_dol = "DOL" in insts
-    has_frc = "FRC" in insts
-    has_ddi = "DDI" in insts
     has_ntnb = "NTN-B" in insts
     same_vcto = len(legs) > 1 and all(l["parsed"]["label"] == legs[0]["parsed"]["label"] for l in legs)
     is_casada = strategy["type"] == "casada"
@@ -173,109 +180,135 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     if coupon_tpf_with_hedge:
         mode = coupon_tpf_with_hedge.get("hedge_mode")
         tpf_name = coupon_tpf_with_hedge["instrument"]
+        hedge_inst = _hedge_instrument_for_tpf(tpf_name)
+        curve_lbl = _curve_label_for_tpf(tpf_name)
         if mode == "strip":
             factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Strip hedge: 1 DI por fluxo, casa key-rates de {tpf_name}"})
+                            "desc": f"Strip hedge: 1 {hedge_inst} por fluxo do {tpf_name} casa DV01 fluxo a fluxo na curva {curve_lbl}"})
             factors.append({"fator": "Inclinacao (steepening)", "exposto": False,
-                            "desc": "Strip hedgeia inclinacao (cada fluxo tem seu DI)"})
+                            "desc": f"Cada cupom tem seu proprio {hedge_inst} no mesmo DU — neutraliza torcoes da curva {curve_lbl}"})
             factors.append({"fator": "Curvatura (butterfly)", "exposto": False,
-                            "desc": "Strip elimina key-rate risk em qualquer cenario de curva"})
+                            "desc": f"Strip casa key-rates em todos os vertices do {tpf_name} — convexidade hedgeada"})
             factors.append({"fator": "Convexidade (gamma)", "exposto": False,
-                            "desc": "Convexidade casada por fluxo"})
+                            "desc": f"Convexidade replicada fluxo a fluxo via strip de {hedge_inst}"})
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "Strip com DAP hedgeia tambem o cupom IPCA"})
+                                "desc": "Strip de DAP fixa o cupom de IPCA em cada vertice — IPCA neutralizado"})
             return factors
         elif mode == "duration":
             factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Duration hedge: DV01 casado no prazo medio de {tpf_name}"})
+                            "desc": f"Duration hedge: 1 {hedge_inst} no D.Mac do {tpf_name} casa DV01 total no shift paralelo"})
             factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
-                            "desc": f"Duration hedge cobre apenas 1 vertice; cupons em outros vertices"})
+                            "desc": f"{hedge_inst} cobre 1 unico vertice (D.Mac); cupons do {tpf_name} ficam em outros vertices da curva {curve_lbl}"})
             factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
-                            "desc": "Duration hedge nao cobre key-rate risk"})
+                            "desc": f"Sem casamento de key-rates em {tpf_name} vs {hedge_inst} (1 vertice) → twist nao-paralelo gera P&L"})
             factors.append({"fator": "Convexidade (gamma)", "exposto": True,
-                            "desc": f"DI zero-coupon vs {tpf_name} com cupons"})
+                            "desc": f"{hedge_inst} (zero-coupon) tem convexidade diferente do {tpf_name} (cupons)"})
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "Duration com DAP hedgeia inflacao (residual: spread IPCA)"})
+                                "desc": "DAP no D.Mac hedgeia IPCA em 1a ordem (residual: spread IPCA por torcao)"})
             return factors
         elif mode == "maturity":
             factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Vencimento hedge: DI no DU final de {tpf_name} (DV01 mismatch leve)"})
+                            "desc": f"Vcto hedge: 1 {hedge_inst} no DU final do {tpf_name} (mismatch de DV01 leve por D.Mac < DU final)"})
             factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
-                            "desc": "Hedge no vencimento descasa duration; cupons expostos a curto"})
+                            "desc": f"Hedge so na ponta longa; cupons intermediarios do {tpf_name} expostos a curto da curva {curve_lbl}"})
             factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
-                            "desc": "Hedge no vencimento nao cobre fluxos intermediarios"})
+                            "desc": f"Cupons em vertices intermediarios sem hedge — sensivel a movimento da barriga da curva {curve_lbl}"})
             factors.append({"fator": "Convexidade (gamma)", "exposto": True,
-                            "desc": f"D.Mac de {tpf_name} < D.Mac do DI no vencimento"})
+                            "desc": f"D.Mac do {tpf_name} < DU final → {hedge_inst} no vencimento gera dollar-duration excessivo no longo"})
             if has_ntnb:
                 factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "DAP no vencimento hedgeia inflacao com mismatch"})
+                                "desc": "DAP no vencimento hedgeia IPCA com mismatch (residual concentrado nos cupons curtos)"})
             return factors
 
     if len(legs) == 1:
         info = INSTRUMENTS[legs[0]["instrument"]]
+        leg = legs[0]
         if info.conv == "price":
-            factors.append({"fator": "Cambio (USD/BRL)", "exposto": True, "desc": f"Direcional em dolar — DV01 R$ {legs[0]['dv01_total']:.0f}/ponto"})
+            factors.append({"fator": "Cambio (USD/BRL)", "exposto": True,
+                            "desc": f"Direcional em USD/BRL — DV01 R$ {leg['dv01_total']:.0f}/ponto (R$ 50 por contrato {leg['instrument']})"})
         else:
-            factors.append({"fator": "Nivel (shift paralelo)", "exposto": True, "desc": f"DV01 total: R$ {legs[0]['dv01_total']:.0f} por bp"})
+            factors.append({"fator": "Nivel (shift paralelo)", "exposto": True,
+                            "desc": f"Direcional na taxa — DV01 R$ {leg['dv01_total']:.0f} por bp na curva {info.benchmark}"})
             if has_cupom_tpf:
-                factors.append({"fator": "Inclinacao", "exposto": True, "desc": "Titulo com cupom tem fluxos em multiplos vertices"})
+                factors.append({"fator": "Inclinacao", "exposto": True,
+                                "desc": f"{leg['instrument']} paga cupom semestral — cada fluxo descontado por sua taxa spot, exposto a torcoes"})
+                factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
+                                "desc": f"Distribuicao de fluxos amplifica sensibilidade a movimento da barriga da curva"})
             if has_ntnb:
-                factors.append({"fator": "Inflacao (IPCA)", "exposto": True, "desc": "NTN-B indexada ao IPCA"})
+                factors.append({"fator": "Inflacao (IPCA)", "exposto": True,
+                                "desc": "NTN-B atualizada por IPCA via VNA — mudanca no IPCA realizado/projetado afeta PU diretamente"})
         return factors
 
     if is_dol_sint:
         factors.append({"fator": "Cambio (USD/BRL)", "exposto": True,
-                        "desc": "DI1+FRC/DDI = dolar forward sintetico. Exposto a variacao cambial."})
+                        "desc": "DI1+FRC/DDI replica dolar forward via paridade coberta — P&L direcional ao spot USD/BRL"})
         factors.append({"fator": "Nivel (taxa pre BRL)", "exposto": False,
-                        "desc": "DI1 e FRC/DDI se cancelam no fator pre — exposicao residual eh cambio."})
+                        "desc": "DI1 e FRC/DDI tem mesmo DV01 com sinais opostos — fator pre cancela em 1a ordem"})
         factors.append({"fator": "Cupom Cambial", "exposto": False,
-                        "desc": "FRC/DDI hedgeia cupom cambial embutido na posicao."})
+                        "desc": "Perna FRC/DDI fixa o cupom cambial embutido — exposicao residual e o spot do dolar"})
         return factors
 
     if is_casada and same_vcto and not has_cupom_tpf:
-        factors.append({"fator": "Nivel (shift paralelo)", "exposto": False, "desc": "Hedge por mesmo vencimento — cancela em 1a ordem"})
+        factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
+                        "desc": "Mesmo vencimento + zero-coupon: DV01 batido — shift paralelo cancela em 1a ordem"})
     elif is_casada and has_cupom_tpf:
-        factors.append({"fator": "Nivel (shift paralelo)", "exposto": False, "desc": "Hedge por DV01 — cancela shift paralelo em 1a ordem"})
+        tpf_inst = next(l["instrument"] for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0)
+        hedge_inst = _hedge_instrument_for_tpf(tpf_inst)
+        factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
+                        "desc": f"Hedge por DV01 com {hedge_inst} cancela shift paralelo em 1a ordem (residual de convexidade)"})
     elif has_dol and has_di:
-        factors.append({"fator": "Nivel (taxa pre BRL)", "exposto": False, "desc": "DOL+DI1 cancela exposicao a taxa pre"})
+        factors.append({"fator": "Nivel (taxa pre BRL)", "exposto": False,
+                        "desc": "DOL paga pre via paridade coberta; DI1 mesma direcao cancela o fator pre BRL"})
     else:
-        factors.append({"fator": "Nivel (shift paralelo)", "exposto": True, "desc": "Pernas com vencimentos ou benchmarks diferentes"})
+        factors.append({"fator": "Nivel (shift paralelo)", "exposto": True,
+                        "desc": "Pernas em vencimentos ou benchmarks distintos — fator nivel nao se cancela"})
 
     if has_dol and has_di:
-        factors.append({"fator": "Cupom Cambial", "exposto": True, "desc": "Posicao sintetica de cupom cambial. Se o cupom implicito mudar, P&L nao-zero."})
+        factors.append({"fator": "Cupom Cambial", "exposto": True,
+                        "desc": "DOL + DI1 (mesma direcao) = cupom cambial sintetico via paridade — sensivel a movimento do FRC implicito"})
 
     if is_casada and has_cupom_tpf:
-        tpf_name = next(l["instrument"] for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0)
+        tpf_inst = next(l["instrument"] for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0)
+        hedge_inst = _hedge_instrument_for_tpf(tpf_inst)
+        curve_lbl = _curve_label_for_tpf(tpf_inst)
         factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
-                        "desc": f"{tpf_name} tem cupons em vertices intermediarios; DI1 cobre apenas 1 vertice."})
+                        "desc": f"{tpf_inst} tem cupons em multiplos vertices da curva {curve_lbl}; {hedge_inst} cobre apenas 1 vertice"})
         factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
-                        "desc": "Convexidade diferente: titulo com cupom vs DI1 zero-coupon."})
+                        "desc": f"{tpf_inst} (com cupons) vs {hedge_inst} (zero-coupon) — convexidades diferentes deixam barriga exposta"})
     elif is_casada and not has_cupom_tpf and same_vcto:
-        factors.append({"fator": "Inclinacao", "exposto": False, "desc": "Mesmo vertice, sem fluxos intermediarios"})
-        factors.append({"fator": "Curvatura", "exposto": False, "desc": "Ambos zero-coupon, convexidade similar"})
+        factors.append({"fator": "Inclinacao", "exposto": False,
+                        "desc": "Ambos zero-coupon no mesmo vertice — sem fluxos intermediarios para gerar exposicao a torcoes"})
+        factors.append({"fator": "Curvatura", "exposto": False,
+                        "desc": "Convexidades praticamente iguais (zero-coupon mesmo prazo) — butterfly nao gera P&L material"})
 
     if has_cupom_tpf and (has_di or has_dap):
         tpf_leg = next(l for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0)
         deriv_leg = next(l for l in legs if l["instrument"] in ("DI1", "DAP"))
         diff = abs(tpf_leg["d_mac"] - deriv_leg["d_mac"])
         factors.append({"fator": "Convexidade (gamma)", "exposto": diff > 0.3,
-                        "desc": f"D.Mac: {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a)"})
+                        "desc": f"D.Mac {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a) — convexidade descasada gera P&L em movimentos grandes"})
 
     if is_casada:
+        spread = strategy.get("spread", 0)
+        bmk = strategy.get("bmk", "CDI")
         factors.append({"fator": "Spread (basis)", "exposto": True,
-                        "desc": f"Spread titulo vs DI: {strategy.get('spread', 0):.2f} bps. Risco de abertura/fechamento."})
+                        "desc": f"Posicao trava a operacao em {bmk} {spread:+.2f} bps — abertura/fechamento do spread move o P&L direto"})
 
     if has_dol and not has_di:
-        factors.append({"fator": "Cambio (USD/BRL)", "exposto": True, "desc": "Exposicao direcional a cambio"})
+        factors.append({"fator": "Cambio (USD/BRL)", "exposto": True,
+                        "desc": "Posicao direcional pura em DOL — sensibilidade R$ 50 por ponto por contrato"})
     elif has_dol and has_di:
-        factors.append({"fator": "Cambio (USD/BRL)", "exposto": False, "desc": "DOL+DI1 neutraliza cambio puro (expoe cupom cambial)"})
+        factors.append({"fator": "Cambio (USD/BRL)", "exposto": False,
+                        "desc": "DOL + DI1 (mesma direcao) neutraliza cambio puro — exposicao residual e o cupom cambial implicito"})
 
     if has_ntnb and not has_dap:
-        factors.append({"fator": "Inflacao (IPCA)", "exposto": True, "desc": "NTN-B sem hedge de inflacao"})
+        factors.append({"fator": "Inflacao (IPCA)", "exposto": True,
+                        "desc": "NTN-B sem DAP — VNA atualizado por IPCA gera P&L direto com surpresa de inflacao"})
     elif has_ntnb and has_dap:
-        factors.append({"fator": "Inflacao (IPCA)", "exposto": False, "desc": "NTN-B + DAP hedgeia inflacao (expoe spread IPCA)"})
+        factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
+                        "desc": "NTN-B + DAP no mesmo vertice neutraliza IPCA em 1a ordem — exposicao residual e o spread real (taxa IPCA)"})
 
     return factors
 
