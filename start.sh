@@ -5,18 +5,12 @@ echo "Starting MCP server on :8000..."
 python server/app.py &
 MCP_PID=$!
 
-echo "Starting Streamlit on :8501..."
-streamlit run casada-tool/app.py \
-    --server.port 8501 \
+sleep 2
+echo "Starting Streamlit on :${PORT:-8080}..."
+exec streamlit run casada-tool/app.py \
+    --server.port "${PORT:-8080}" \
     --server.headless true \
-    --server.address 127.0.0.1 \
+    --server.address 0.0.0.0 \
     --server.enableCORS false \
     --server.enableXsrfProtection false \
-    --browser.gatherUsageStats false &
-STL_PID=$!
-
-sleep 3
-echo "Starting proxy on :${PORT:-8080}..."
-python proxy.py
-
-wait $MCP_PID $STL_PID
+    --browser.gatherUsageStats false
