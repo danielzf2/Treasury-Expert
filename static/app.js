@@ -12,8 +12,12 @@ const SCENARIOS = {
 
 function brDate() {
     const now = new Date();
-    const br = new Date(now.toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-    return br.toISOString().slice(0, 10);
+    const utcMs = now.getTime();
+    const brMs = utcMs - 3 * 60 * 60 * 1000;
+    const br = new Date(brMs);
+    return br.getUTCFullYear() + "-" +
+        String(br.getUTCMonth() + 1).padStart(2, "0") + "-" +
+        String(br.getUTCDate()).padStart(2, "0");
 }
 
 const state = {

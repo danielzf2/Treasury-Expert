@@ -279,7 +279,9 @@ def fetch_all(anbima_client_id: str = "", anbima_secret: str = "", sandbox: bool
     B3 e BCB sao sempre buscados. ANBIMA so se client_id+secret forem fornecidos.
     """
     snap = MarketSnapshot()
-    snap.timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    from datetime import timezone, timedelta
+    brt = timezone(timedelta(hours=-3))
+    snap.timestamp = datetime.now(brt).strftime("%d/%m/%Y %H:%M:%S")
 
     # BCB
     cdi_data = fetch_cdi_over(1)
