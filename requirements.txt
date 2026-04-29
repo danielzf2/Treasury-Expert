@@ -7,6 +7,6 @@ fastapi
 openai
 httpx
 websockets
-streamlit>=1.38
+streamlit>=1.53
 plotly>=5.22
 pandas>=2.0
