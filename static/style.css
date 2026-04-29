@@ -88,6 +88,36 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
     border-bottom-color: #58a6ff;
 }
 
+/* Sub-tabs (dentro do Simulador) — visual mais sutil que .tabs */
+.sub-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px dashed #30363d;
+    margin: 4px 0 16px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+.sub-tabs button {
+    background: none;
+    border: none;
+    color: #8b949e;
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+    font-family: inherit;
+}
+.sub-tabs button:hover { color: #e6edf3; }
+.sub-tabs button.active {
+    color: #e6edf3;
+    border-bottom-color: #58a6ff;
+}
+@media (max-width: 600px) {
+    .sub-tabs button { padding: 8px 12px; font-size: 12px; }
+}
+
 /* Presets */
 .presets {
     display: flex;

@@ -51,6 +51,7 @@ const state = {
     expandFlows: false,
     activeTab: "sim",
     activeChartTab: "curve",
+    activeSimSubTab: "pernas",
 };
 
 async function init() {
@@ -83,6 +84,31 @@ function switchTab(tab) {
     document.getElementById("tab-sim").style.display = tab === "sim" ? "" : "none";
     document.getElementById("tab-mkt").style.display = tab === "mkt" ? "" : "none";
     document.getElementById("tab-formulas").style.display = tab === "formulas" ? "" : "none";
+
+    if (tab === "sim" && state.activeSimSubTab === "cenarios") {
+        requestAnimationFrame(() => resizeScenarioCharts());
+    }
+}
+
+function switchSimSubTab(name) {
+    state.activeSimSubTab = name;
+    document.querySelectorAll("#simSubTabs button").forEach((b, i) => {
+        b.classList.toggle("active", ["pernas","cenarios","detalhes"][i] === name);
+    });
+    document.getElementById("subtab-pernas").style.display   = name === "pernas"   ? "" : "none";
+    document.getElementById("subtab-cenarios").style.display = name === "cenarios" ? "" : "none";
+    document.getElementById("subtab-detalhes").style.display = name === "detalhes" ? "" : "none";
+
+    if (name === "cenarios") {
+        requestAnimationFrame(() => resizeScenarioCharts());
+    }
+}
+
+function resizeScenarioCharts() {
+    ["chartContainer","pnlBarsChart","pnlConsolidatedChart","pnlPerLegChart"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el._fullLayout) Plotly.Plots.resize(id);
+    });
 }
 
 const _tickerCache = {};
@@ -852,10 +878,5 @@ document.addEventListener("DOMContentLoaded", () => {
 let _resizeTimer;
 window.addEventListener("resize", () => {
     clearTimeout(_resizeTimer);
-    _resizeTimer = setTimeout(() => {
-        ["chartContainer","pnlBarsChart","pnlConsolidatedChart","pnlPerLegChart"].forEach(id => {
-            const el = document.getElementById(id);
-            if (el && el._fullLayout) Plotly.Plots.resize(id);
-        });
-    }, 200);
+    _resizeTimer = setTimeout(() => resizeScenarioCharts(), 200);
 });
