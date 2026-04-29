@@ -43,6 +43,9 @@ const state = {
     legs: [],
     presets: {},
     marketData: null,
+    vnaData: null,
+    anbimaTpfData: null,
+    sourcesStatus: null,
     results: null,
     scenarioKey: "bull_par",
     magnitude: 10,
@@ -244,15 +247,56 @@ function removeLeg(i) {
 async function fetchMarketData() {
     const btn = document.getElementById("btnFetchMarket");
     btn.disabled = true; btn.textContent = "Carregando...";
+
+    const sources = {b3_bcb: null, vna: null, anbima_tpf: null};
+    const t0 = Date.now();
+
     try {
-        const resp = await fetch("/sim/market-data");
-        state.marketData = await resp.json();
-        document.getElementById("mktTimestamp").textContent = `Atualizado: ${state.marketData.timestamp}`;
+        const [mktRes, vnaRes, tpfRes] = await Promise.allSettled([
+            fetch("/sim/market-data").then(r => r.json()),
+            fetch("/sim/vna").then(r => r.json()),
+            fetch("/sim/anbima-tpf").then(r => r.json()),
+        ]);
+
+        if (mktRes.status === "fulfilled") {
+            state.marketData = mktRes.value;
+            sources.b3_bcb = {ok: true, data: state.marketData};
+        } else {
+            sources.b3_bcb = {ok: false, error: String(mktRes.reason)};
+        }
+
+        if (vnaRes.status === "fulfilled") {
+            state.vnaData = vnaRes.value;
+            const ok = (state.vnaData.records || []).length > 0;
+            sources.vna = {ok, data: state.vnaData};
+        } else {
+            sources.vna = {ok: false, error: String(vnaRes.reason)};
+        }
+
+        if (tpfRes.status === "fulfilled") {
+            state.anbimaTpfData = tpfRes.value;
+            const ok = (state.anbimaTpfData.records || []).length > 0;
+            sources.anbima_tpf = {ok, data: state.anbimaTpfData};
+        } else {
+            sources.anbima_tpf = {ok: false, error: String(tpfRes.reason)};
+        }
+
+        state.sourcesStatus = {
+            ts: new Date().toLocaleTimeString("pt-BR"),
+            elapsed_ms: Date.now() - t0,
+            sources,
+        };
+
+        if (state.marketData) {
+            document.getElementById("mktTimestamp").textContent = `Atualizado: ${state.marketData.timestamp}`;
+        }
         Object.keys(_tickerCache).forEach(k => delete _tickerCache[k]);
-        renderMarketIndicators();
+        if (state.marketData) renderMarketIndicators();
         renderMarketDataTab();
-        updateLegsFromMarket();
-        processLegs();
+        if (state.marketData) {
+            updateLegsFromMarket();
+            processLegs();
+        }
     } catch(e) { console.error(e); }
     btn.disabled = false; btn.textContent = "Atualizar Dados de Mercado";
 }
@@ -783,14 +827,25 @@ function renderMtmTable(table, legs) {
 }
 
 function renderMarketDataTab() {
-    const m = state.marketData; if (!m) return;
+    const m = state.marketData;
     const el = document.getElementById("mktDataContent");
-    let html = `<p class="muted" style="margin-bottom:12px">Atualizado: ${m.timestamp}</p>`;
+
+    let html = renderSourcesStatus();
+
+    if (!m) {
+        el.innerHTML = html || `<p class="muted">Sem dados de mercado disponiveis.</p>`;
+        return;
+    }
+
+    html += `<p class="muted" style="margin-bottom:12px">Atualizado: ${m.timestamp}</p>`;
     html += '<div class="metrics">';
     html += `<div class="metric"><div class="label">CDI Over</div><div class="value">${m.cdi_aa.toFixed(2)}% a.a.</div></div>`;
     html += `<div class="metric"><div class="label">CDI Dia</div><div class="value">${m.cdi_over_dia.toFixed(6)}%</div></div>`;
     html += `<div class="metric"><div class="label">PTAX Venda</div><div class="value">R$ ${m.ptax.toFixed(4)}</div></div>`;
     html += `<div class="metric"><div class="label">Spot USD</div><div class="value">${m.spot_usd>0?"R$ "+m.spot_usd.toFixed(4):"--"}</div></div></div>`;
+
+    html += renderVnaTable();
+
     html += '<hr class="divider">';
     html += renderMktTable("Curva DI Futuro (B3)", m.di1, ["symb","vcto","last","bid","ask","ajuste"]);
     html += '<div class="two-col">';
@@ -800,7 +855,153 @@ function renderMarketDataTab() {
     html += renderMktTable("DOL — Dólar Futuro (B3)", m.dol, ["symb","vcto","last","bid","ask","ajuste"]);
     html += renderMktTable("DDI — Cupom Cambial Sujo (B3)", m.ddi.filter(c=>c.ajuste>0||c.last>0), ["symb","vcto","last","ajuste"]);
     html += '</div>';
+
+    html += renderAnbimaTpfTables();
+
     el.innerHTML = html;
+}
+
+function renderSourcesStatus() {
+    const s = state.sourcesStatus;
+    if (!s) return '';
+
+    const m = state.marketData;
+    const vna = state.vnaData;
+    const tpf = state.anbimaTpfData;
+    const cards = [];
+
+    // B3 derivativos
+    if (s.sources.b3_bcb && s.sources.b3_bcb.ok && m) {
+        const counts = [
+            `DI1: ${(m.di1||[]).length}`,
+            `DAP: ${(m.dap||[]).length}`,
+            `FRC: ${(m.frc||[]).length}`,
+            `DDI: ${(m.ddi||[]).length}`,
+            `DOL: ${(m.dol||[]).length}`,
+        ].join(" · ");
+        cards.push({status:"ok", title:"B3 — Derivativos", subtitle:counts,
+                    detail:`${m.timestamp} · cotacao.b3.com.br`});
+    } else {
+        cards.push({status:"err", title:"B3 — Derivativos", subtitle:"Falha ao buscar",
+                    detail: s.sources.b3_bcb?.error || "sem resposta"});
+    }
+
+    // BCB indicadores
+    if (m) {
+        const cdi = m.cdi_aa>0 ? `CDI ${m.cdi_aa.toFixed(2)}%` : null;
+        const ptax = m.ptax>0 ? `PTAX ${m.ptax.toFixed(4)}` : null;
+        const parts = [cdi, ptax].filter(Boolean).join(" · ");
+        cards.push({status: parts?"ok":"warn", title:"BCB — Indicadores",
+                    subtitle: parts || "sem dados",
+                    detail:"api.bcb.gov.br · CDI, PTAX, Selic, IPCA"});
+    } else {
+        cards.push({status:"err", title:"BCB — Indicadores", subtitle:"--", detail:"sem dados"});
+    }
+
+    // VNA Brasil Indicadores
+    if (s.sources.vna && s.sources.vna.ok && vna) {
+        const ntnb = vna.vna_ntnb;
+        const lft = vna.vna_lft;
+        const dataRef = vna.records[0]?.data_ref || "--";
+        const parts = [];
+        if (ntnb) parts.push(`NTN-B R$ ${ntnb.toFixed(6)}`);
+        if (lft) parts.push(`LFT R$ ${lft.toFixed(6)}`);
+        cards.push({status:"ok", title:"VNA — Brasil Indicadores",
+                    subtitle: parts.join(" · "),
+                    detail:`ref ${dataRef} · brasilindicadores.com.br`});
+    } else {
+        cards.push({status:"err", title:"VNA — Brasil Indicadores",
+                    subtitle:"Indisponivel — usando fallback",
+                    detail: s.sources.vna?.error || "feed offline"});
+    }
+
+    // ANBIMA TPF
+    if (s.sources.anbima_tpf && s.sources.anbima_tpf.ok && tpf) {
+        const records = tpf.records || [];
+        const byInst = {};
+        records.forEach(r => { byInst[r.instrument] = (byInst[r.instrument]||0) + 1; });
+        const counts = Object.entries(byInst).map(([k,v]) => `${k}: ${v}`).join(" · ");
+        cards.push({status:"ok", title:"ANBIMA — TPF (PU oficial)",
+                    subtitle: counts || "sem registros",
+                    detail:`ref ${tpf.data_ref || "--"} · anbima.com.br/ms{YYMMDD}.txt`});
+    } else {
+        cards.push({status:"err", title:"ANBIMA — TPF (PU oficial)",
+                    subtitle:"Feed indisponivel",
+                    detail: s.sources.anbima_tpf?.error || "feed D-1 nao publicado ainda"});
+    }
+
+    const cardsHtml = cards.map(c => {
+        const dot = `<span class="src-dot src-${c.status}"></span>`;
+        return `<div class="source-card">
+            <div class="source-head">${dot}<span class="source-title">${c.title}</span></div>
+            <div class="source-sub">${c.subtitle}</div>
+            <div class="source-detail muted">${c.detail}</div>
+        </div>`;
+    }).join("");
+
+    return `<div style="margin-bottom:8px">
+        <h3 style="font-size:14px;margin-bottom:8px">Fontes de Dados <span class="muted" style="font-size:11px;font-weight:400">· consultadas em ${s.ts} (${s.elapsed_ms}ms)</span></h3>
+        <div class="source-grid">${cardsHtml}</div>
+    </div>
+    <hr class="divider">`;
+}
+
+function renderVnaTable() {
+    const vna = state.vnaData;
+    if (!vna || !vna.records || !vna.records.length) return '';
+    const rows = vna.records.map(r => `
+        <tr>
+            <td>${r.instrument}</td>
+            <td class="mono tr">R$ ${r.vna.toLocaleString("pt-BR", {minimumFractionDigits:6, maximumFractionDigits:6})}</td>
+            <td>${r.data_ref}</td>
+            <td class="muted">${r.indice_str || ""}</td>
+        </tr>`).join("");
+    return `<div style="margin-top:16px">
+        <h3 style="font-size:14px;margin-bottom:8px">VNA D0 (Brasil Indicadores)</h3>
+        <table class="sim-tbl">
+            <thead><tr><th>Titulo</th><th class="tr">VNA</th><th>Data Ref</th><th>Indice</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+function renderAnbimaTpfTables() {
+    const tpf = state.anbimaTpfData;
+    if (!tpf || !tpf.records || !tpf.records.length) return '';
+
+    const byInst = {};
+    tpf.records.forEach(r => {
+        if (!byInst[r.instrument]) byInst[r.instrument] = [];
+        byInst[r.instrument].push(r);
+    });
+
+    const order = ["LTN", "NTN-F", "NTN-B", "LFT", "NTN-C"];
+    let html = '<hr class="divider">';
+    html += `<h3 style="font-size:14px;margin-bottom:8px">ANBIMA — Titulos Publicos (PU oficial · ref ${tpf.data_ref})</h3>`;
+    html += '<div class="two-col">';
+    let count = 0;
+    for (const inst of order) {
+        const rows = byInst[inst];
+        if (!rows || !rows.length) continue;
+        if (count > 0 && count % 2 === 0) html += '</div><div class="two-col">';
+        const trs = rows.map(r => `
+            <tr>
+                <td>${r.data_vencimento}</td>
+                <td class="mono tr">${r.tx_indicativa.toFixed(4)}%</td>
+                <td class="mono tr">${r.pu.toLocaleString("pt-BR", {minimumFractionDigits:6, maximumFractionDigits:6})}</td>
+                <td class="muted tr">${r.tx_compra.toFixed(4)} / ${r.tx_venda.toFixed(4)}</td>
+            </tr>`).join("");
+        html += `<div>
+            <h4 style="font-size:13px;margin:8px 0">${inst} <span class="muted" style="font-weight:400">(${rows.length})</span></h4>
+            <table class="sim-tbl">
+                <thead><tr><th>Vencimento</th><th class="tr">Tx Indic</th><th class="tr">PU</th><th class="tr">Compra/Venda</th></tr></thead>
+                <tbody>${trs}</tbody>
+            </table>
+        </div>`;
+        count++;
+    }
+    html += '</div>';
+    return html;
 }
 
 function renderMktTable(title, data, cols) {
