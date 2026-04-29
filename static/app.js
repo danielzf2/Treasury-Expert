@@ -310,29 +310,31 @@ async function loadCharts() {
     const base = {legs: r.legs, scenario_key: state.scenarioKey, magnitude: state.magnitude,
         delta_fx_pct: state.deltaFx, delta_ipca_bps: state.deltaIpca, delta_cupom_bps: state.deltaCupom};
 
-    const chartReqs = [
-        fetch("/sim/charts/curve", {method:"POST", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({...base, di1: state.marketData?.di1||[], dap: state.marketData?.dap||[]})}),
-        fetch("/sim/charts/pnl-bars", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(base)}),
-        fetch("/sim/charts/pnl-consolidated", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(base)}),
-        fetch("/sim/charts/pnl-per-leg", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(base)}),
-        fetch("/sim/mtm-table", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(base)}),
-    ];
-
-    const [curveR, pnlR, consR, perLegR, mtmR] = await Promise.all(chartReqs);
-    const [curve, pnl, cons, perLeg, mtm] = await Promise.all([curveR.json(), pnlR.json(), consR.json(), perLegR.json(), mtmR.json()]);
-
     const plotCfg = {displayModeBar:false, responsive:true};
-    if (curve.data) Plotly.newPlot("chartContainer", curve.data, curve.layout, plotCfg);
-    if (pnl.data) Plotly.newPlot("pnlBarsChart", pnl.data, pnl.layout, plotCfg);
-    if (cons.data) Plotly.newPlot("pnlConsolidatedChart", cons.data, cons.layout, plotCfg);
-    if (perLeg.data) Plotly.newPlot("pnlPerLegChart", perLeg.data, perLeg.layout, plotCfg);
 
-    if (mtm.total_pnl !== undefined) {
+    async function safeChart(url, body, divId) {
+        try {
+            const resp = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+            if (!resp.ok) { console.error(url, resp.status, await resp.text()); return null; }
+            const fig = await resp.json();
+            if (fig.data && divId) Plotly.newPlot(divId, fig.data, fig.layout, plotCfg);
+            return fig;
+        } catch(e) { console.error(url, e); return null; }
+    }
+
+    const [curve, pnl, cons, perLeg, mtm] = await Promise.all([
+        safeChart("/sim/charts/curve", {...base, di1:state.marketData?.di1||[], dap:state.marketData?.dap||[]}, "chartContainer"),
+        safeChart("/sim/charts/pnl-bars", base, "pnlBarsChart"),
+        safeChart("/sim/charts/pnl-consolidated", base, "pnlConsolidatedChart"),
+        safeChart("/sim/charts/pnl-per-leg", base, "pnlPerLegChart"),
+        safeChart("/sim/mtm-table", base, null),
+    ]);
+
+    if (mtm && mtm.total_pnl !== undefined) {
         document.getElementById("pnlTotal").innerHTML =
             `<div class="metric"><div class="label">P&L Total do Cenário</div><div class="value ${mtm.total_pnl>=0?"green":"red"}">R$ ${mtm.total_pnl>=0?"+":""}${mtm.total_pnl.toLocaleString("pt-BR",{maximumFractionDigits:0})}</div></div>`;
     }
-    if (mtm.table) renderMtmTable(mtm.table, r.legs);
+    if (mtm && mtm.table) renderMtmTable(mtm.table, r.legs);
 
     renderChartTabs();
 }
@@ -431,74 +433,84 @@ function renderMktTable(title, data, cols) {
 }
 
 function renderFormulas() {
+    const K = (tex) => { try { return katex.renderToString(tex, {displayMode:true,throwOnError:false}); } catch(e) { return `<pre>${tex}</pre>`; } };
+    const k = (tex) => { try { return katex.renderToString(tex, {displayMode:false,throwOnError:false}); } catch(e) { return `<code>${tex}</code>`; } };
+
     document.getElementById("formulasContent").innerHTML = `
+    <p class="muted" style="margin-bottom:12px">Todas as fórmulas usadas no simulador. Convenções do mercado brasileiro.</p>
+
     <div class="sim-card"><div class="sim-card-h">Títulos Públicos (TPF)</div><div style="padding:16px">
     <h4>LTN — Zero-Coupon Prefixado</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = 1.000 / (1 + taxa)^(DU/252)</p>
-    <p class="muted" style="font-size:11px">Convencao: exponencial, base 252 DU. Truncamento ANBIMA: T-6.</p>
+    ${K("PU = \\frac{1.000}{(1 + taxa)^{DU/252}}")}
+    <p class="muted" style="font-size:11px">Exponencial, base 252 DU. Truncamento ANBIMA: T-6.</p>
     <h4 style="margin-top:16px">NTN-F — Prefixado com Cupom Semestral</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">Cup_sem = (1,10)^0,5 - 1 = 4,880885%</p>
-    <p class="mono" style="font-size:14px">PU = Σ [Cup × VN / (1+TIR)^(DUi/252)] + VN/(1+TIR)^(DUn/252)</p>
+    ${K("Cup_{sem} = (1{,}10)^{0{,}5} - 1 = 4{,}880885\\%")}
+    ${K("PU = \\sum_{i=1}^{n} \\frac{Cup \\times VN}{(1 + TIR)^{DU_i/252}} + \\frac{VN}{(1 + TIR)^{DU_n/252}}")}
     <h4 style="margin-top:16px">NTN-B — IPCA+ com Cupom Semestral</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">Cup_sem = (1,06)^0,5 - 1 = 2,956301%</p>
-    <p class="mono" style="font-size:14px">PU = (Cotacao/100) × VNA</p>
-    <p class="muted" style="font-size:11px">Cotacao truncada 4 casas. VNA truncado 6 casas.</p>
+    ${K("Cup_{sem} = (1{,}06)^{0{,}5} - 1 = 2{,}956301\\%")}
+    ${K("PU = \\frac{Cotação}{100} \\times VNA")}
+    <p class="muted" style="font-size:11px">Cotação truncada 4 casas (T-4). VNA truncado 6 casas (T-6).</p>
     <h4 style="margin-top:16px">LFT — Tesouro Selic</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = (Cotacao/100) × VNA_Selic</p>
+    ${K("PU = \\frac{Cotação}{100} \\times VNA_{Selic}")}
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Derivativos de Taxa de Juros</div><div style="padding:16px">
     <h4>DI1 — Futuro de DI</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = 100.000 / (1 + taxa)^(DU/252)</p>
+    ${K("PU = \\frac{100.000}{(1 + taxa)^{DU/252}}")}
     <p class="muted" style="font-size:11px">Face R$ 100.000. Vencimento: 1º DU do mês.</p>
     <h4 style="margin-top:16px">DAP — Futuro de Cupom de IPCA</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = 100.000 / (1 + cupom_IPCA)^(DU/252)</p>
+    ${K("PU = \\frac{100.000}{(1 + cupom_{IPCA})^{DU/252}}")}
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Derivativos de Câmbio</div><div style="padding:16px">
     <h4>DOL — Dólar Futuro</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">AJ = (PA - PO) × qtd × 50</p>
-    <p class="muted" style="font-size:11px">Cotacao em R$ por USD 1.000. Multiplicador: R$ 50/ponto.</p>
+    ${K("AJ = (PA - PO) \\times qtd \\times 50")}
+    <p class="muted" style="font-size:11px">Cotação em R$ por USD 1.000. Multiplicador: R$ 50/ponto.</p>
     <h4 style="margin-top:16px">DDI — Cupom Cambial Sujo</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = 100.000 / (1 + taxa × DC/360)</p>
-    <p class="muted" style="font-size:11px">Convencao: linear, base 360 DC.</p>
+    ${K("PU = \\frac{100.000}{1 + taxa \\times \\frac{DC}{360}}")}
     <h4 style="margin-top:16px">FRC — FRA de Cupom Cambial (Limpo)</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">PU = 50.000 / (1 + cupom × DC/360)</p>
+    ${K("PU = \\frac{50.000}{1 + cupom \\times \\frac{DC}{360}}")}
     <h4 style="margin-top:16px">Cupom Cambial Implícito (DOL + DI1)</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">cupom = [(Spot×1000/DOL) × (1+DI)^(DU/252) - 1] × 360/DC × 100</p>
+    ${K("cupom = \\left[\\frac{Spot \\times 1000}{DOL} \\times (1 + DI)^{DU/252} - 1\\right] \\times \\frac{360}{DC} \\times 100")}
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Duration e Risco</div><div style="padding:16px">
     <h4>Duration de Macaulay</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">D_mac = Σ(ti × PVi) / Σ(PVi)</p>
+    ${K("D_{mac} = \\frac{\\sum_{i=1}^{n} t_i \\times PV_i}{\\sum_{i=1}^{n} PV_i}")}
     <h4 style="margin-top:16px">Duration Modificada</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">D_mod = D_mac / (1 + taxa)</p>
-    <h4 style="margin-top:16px">DV01</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">DV01 = D_mod × PU × 0,0001</p>
+    ${K("D_{mod} = \\frac{D_{mac}}{1 + taxa}")}
+    <h4 style="margin-top:16px">DV01 (Dollar Value of 01)</h4>
+    ${K("DV01 = D_{mod} \\times PU \\times 0{,}0001")}
+    <h4 style="margin-top:16px">Aproximação de Preço (Taylor 2ª ordem)</h4>
+    ${K("\\frac{\\Delta P}{P} \\approx -D_{mod} \\times \\Delta y + \\frac{1}{2} C \\times (\\Delta y)^2")}
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Interpolação Flat Forward (B3 V14)</div><div style="padding:16px">
-    <p class="mono" style="margin:8px 0;font-size:14px">fwd = [(1+r2)^(DU2/252) / (1+r1)^(DU1/252)]^(252/(DU2-DU1)) - 1</p>
-    <p class="mono" style="font-size:14px">r_alvo = [(1+r1)^(DU1/252) × (1+fwd)^((DU_alvo-DU1)/252)]^(252/DU_alvo) - 1</p>
-    <p class="muted" style="font-size:11px">Premissa: taxa forward constante entre vertices adjacentes.</p>
+    ${K("fwd = \\left[\\frac{(1+r_2)^{DU_2/252}}{(1+r_1)^{DU_1/252}}\\right]^{252/(DU_2-DU_1)} - 1")}
+    ${K("r_{alvo} = \\left[(1+r_1)^{DU_1/252} \\times (1+fwd)^{(DU_{alvo}-DU_1)/252}\\right]^{252/DU_{alvo}} - 1")}
+    <p class="muted" style="font-size:11px">Premissa: taxa forward constante entre vértices adjacentes. Manual de Curvas B3 V14.</p>
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Conversões de Taxa</div><div style="padding:16px">
     <h4>CDI + Spread vs Pré</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">(1+CDI) × (1+Spread) = (1+Pré)</p>
-    <p class="muted" style="font-size:11px">NUNCA somar CDI + Spread diretamente.</p>
+    ${K("(1 + CDI) \\times (1 + Spread) = (1 + Pré)")}
+    <p class="muted" style="font-size:11px">NUNCA somar CDI + Spread diretamente. A composição é multiplicativa.</p>
     <h4 style="margin-top:16px">Fisher (Nominal vs Real)</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">(1+nominal) = (1+real) × (1+inflacao)</p>
+    ${K("(1 + nominal) = (1 + real) \\times (1 + inflação)")}
     <h4 style="margin-top:16px">Linear 360 vs Exponencial 252</h4>
-    <p class="mono" style="margin:8px 0;font-size:14px">exp252 = (1 + lin360 × DC/360)^(252/DU) - 1</p>
+    ${K("exp_{252} = \\left(1 + lin_{360} \\times \\frac{DC}{360}\\right)^{252/DU} - 1")}
     </div></div>
 
     <div class="sim-card"><div class="sim-card-h">Cenários de Curva</div><div style="padding:16px">
-    <p class="muted" style="font-size:11px">t = posicao normalizada na curva (-1 = curto, +1 = longo)</p>
-    <h4>Paralelo (Shift)</h4><p class="mono" style="font-size:14px">Δi = ± magnitude</p>
-    <h4 style="margin-top:12px">Steepener / Flattener</h4><p class="mono" style="font-size:14px">Δi = magnitude × ti</p>
-    <h4 style="margin-top:12px">Butterfly</h4><p class="mono" style="font-size:14px">Δi = magnitude × (1 - ti²) - magnitude/2</p>
+    <p class="muted" style="font-size:11px;margin-bottom:12px">${k("t")} = posição normalizada na curva (${k("-1")} = curto, ${k("+1")} = longo)</p>
+    <h4>Paralelo (Shift)</h4>${K("\\Delta_i = \\pm magnitude")}
+    <h4 style="margin-top:12px">Steepener / Flattener</h4>${K("\\Delta_i = magnitude \\times t_i")}
+    <h4 style="margin-top:12px">Butterfly</h4>${K("\\Delta_i = magnitude \\times (1 - t_i^2) - \\frac{magnitude}{2}")}
     </div></div>`;
 }
 
-document.addEventListener("DOMContentLoaded", () => { init(); renderFormulas(); });
+document.addEventListener("DOMContentLoaded", () => {
+    init();
+    if (typeof katex !== "undefined") { renderFormulas(); }
+    else { document.querySelector('script[src*="katex"]').addEventListener("load", renderFormulas); }
+});
