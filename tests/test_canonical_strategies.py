@@ -148,10 +148,14 @@ class TestFraCupomIpca:
     def test_risk_factors_fra(self, legs_fra):
         s = detect_strategy(legs_fra, SPOT)
         factors = analyze_risk_factors(legs_fra, s)
-        # IPCA+ cancela (ambas pernas DAP opostas), CDI cancela
-        ipca = next((f for f in factors if "IPCA+" in f["fator"] and "cancela" in f["fator"]), None)
+        # IPCA+ presente (ambas pernas DAP opostas) — pode ser cancela ou parcial
+        # dependendo do DV01 ratio entre os dois vctos
+        ipca = next((f for f in factors if "IPCA+" in f["fator"]), None)
         assert ipca is not None
-        assert ipca["exposto"] is False
+        # Inclinacao Cupom IPCA deve aparecer (FRA eh trade de inclinacao)
+        incl = next((f for f in factors if "Inclinacao" in f["fator"]), None)
+        assert incl is not None
+        assert incl["exposto"] is True
 
 
 # ---------------------------------------------------------------------------

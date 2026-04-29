@@ -476,16 +476,35 @@ function renderAvTable(r) {
     const autoLegs = r.legs.filter(l => l.auto);
     const userLegs = r.legs.filter(l => !l.auto);
     const aggregateAuto = autoLegs.length >= 3;
+    const net = r.strategy.net_exposure;
 
-    let html = '<div class="av-wrap"><table class="sim-tbl"><tr><th></th><th>Instrumento</th><th class="tc av-col-ativo">Ativo</th><th class="tc av-col-passivo">Passivo</th><th class="tc">Vcto</th></tr>';
+    // Fatores cancelados: usados pra fazer strikethrough nas pernas
+    const cancelledFactors = new Set((net?.cancelled || []).map(c => c.factor));
+
+    function markCancelled(text) {
+        if (!text || text === "—") return text;
+        for (const factor of cancelledFactors) {
+            if (text.includes(factor)) {
+                return `<span class="av-cancelled">${text}</span>`;
+            }
+        }
+        return text;
+    }
+
+    let html = '<div class="av-wrap"><table class="sim-tbl">';
+    html += '<tr><th></th><th>Instrumento</th><th class="tc av-col-ativo">Ativo</th><th class="tc av-col-passivo">Passivo</th><th class="tc">Vcto</th></tr>';
+
     userLegs.forEach(l => {
         const isBuy = l.direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
         const dirColor = isBuy ? "#3fb950" : "#f85149";
         html += `<tr><td><span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
-            <td class="bold">${l.instrument}</td><td class="tc mono av-col-ativo">${l.exp_ativo}</td>
-            <td class="tc mono av-col-passivo">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
+            <td class="bold">${l.instrument}</td>
+            <td class="tc mono av-col-ativo">${markCancelled(l.exp_ativo)}</td>
+            <td class="tc mono av-col-passivo">${markCancelled(l.exp_passivo)}</td>
+            <td class="tc mono muted">${l.parsed_label}</td></tr>`;
     });
+
     if (aggregateAuto) {
         const isBuy = autoLegs[0].direction === "C";
         const dirLabel = isBuy ? "Compra" : "Venda";
@@ -495,7 +514,8 @@ function renderAvTable(r) {
         const maxVcto = autoLegs[autoLegs.length-1].parsed_label;
         html += `<tr style="opacity:0.75"><td><span class="auto-badge">AUTO</span> <span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
             <td class="bold">${hedgeInst} Hedge × ${autoLegs.length}</td>
-            <td class="tc mono muted" colspan="2">strip de ${minVcto} a ${maxVcto}</td>
+            <td class="tc mono muted av-col-ativo" colspan="1">strip</td>
+            <td class="tc mono muted av-col-passivo">${minVcto}–${maxVcto}</td>
             <td class="tc mono muted">${autoLegs.length} vértices</td></tr>`;
     } else {
         autoLegs.forEach(l => {
@@ -503,28 +523,18 @@ function renderAvTable(r) {
             const dirLabel = isBuy ? "Compra" : "Venda";
             const dirColor = isBuy ? "#3fb950" : "#f85149";
             html += `<tr style="opacity:0.7"><td><span class="auto-badge">AUTO</span> <span style="color:${dirColor};font-weight:600">${dirLabel}</span></td>
-                <td class="bold">${l.instrument}</td><td class="tc mono">${l.exp_ativo}</td>
-                <td class="tc mono">${l.exp_passivo}</td><td class="tc mono muted">${l.parsed_label}</td></tr>`;
+                <td class="bold">${l.instrument}</td>
+                <td class="tc mono av-col-ativo">${markCancelled(l.exp_ativo)}</td>
+                <td class="tc mono av-col-passivo">${markCancelled(l.exp_passivo)}</td>
+                <td class="tc mono muted">${l.parsed_label}</td></tr>`;
         });
     }
-    // Resultado liquido no formato Ativo | Passivo (como as pernas)
-    const net = r.strategy.net_exposure;
+
+    // Linha RESULTADO: mesma estrutura Ativo | Passivo, sem barra azul separada
     if (net) {
         const ativoEntries = [];
         const passivoEntries = [];
 
-        for (const c of (net.cancelled || [])) {
-            if (c.spread_bps && c.spread_bps > 0) {
-                ativoEntries.push(`${c.factor} ${(c.ativo_total||0).toFixed(3)}%`);
-                passivoEntries.push(`${c.factor} ${(c.passivo_total||0).toFixed(3)}%`);
-            } else if (c.spread_bps && c.spread_bps < 0) {
-                ativoEntries.push(`${c.factor} ${(c.ativo_total||0).toFixed(3)}%`);
-                passivoEntries.push(`${c.factor} ${(c.passivo_total||0).toFixed(3)}%`);
-            } else {
-                ativoEntries.push(c.factor);
-                passivoEntries.push(c.factor);
-            }
-        }
         for (const re of (net.residual || [])) {
             const rateStr = re.rate_total != null ? ` ${re.rate_total.toFixed(3)}%` : "";
             if (re.side === "ativo") ativoEntries.push(`${re.factor}${rateStr}`);
@@ -534,15 +544,14 @@ function renderAvTable(r) {
         const ativoStr = ativoEntries.length ? ativoEntries.join(" + ") : "—";
         const passivoStr = passivoEntries.length ? passivoEntries.join(" + ") : "—";
 
-        html += `<tr class="av-net-result">
-            <td colspan="2" style="text-align:right;font-weight:600;color:#8b949e;font-size:11px;padding-right:8px">RESULTADO</td>
-            <td class="tc mono av-net-ativo">${ativoStr}</td>
-            <td class="tc mono av-net-passivo">${passivoStr}</td>
+        html += `<tr class="av-result-row">
+            <td style="font-weight:600;color:#58a6ff;font-size:12px">Resultado</td>
+            <td class="mono" style="color:#e6edf3;font-weight:600">${r.strategy.result}</td>
+            <td class="tc mono av-col-ativo" style="font-weight:600;color:#e6edf3">${ativoStr}</td>
+            <td class="tc mono av-col-passivo" style="font-weight:600;color:#e6edf3">${passivoStr}</td>
             <td></td></tr>`;
-        html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
-    } else {
-        html += `<tr class="av-result"><td colspan="5">${r.strategy.result}</td></tr>`;
     }
+
     if (r.strategy.economic_description) {
         const name = r.strategy.name ? `<span style="color:#58a6ff;font-weight:600">${r.strategy.name}</span> — ` : "";
         html += `<tr class="av-econ"><td colspan="5" style="padding:8px 12px;font-size:11.5px;line-height:1.5;color:#8b949e;border-top:1px dashed rgba(100,100,100,0.2)">${name}${r.strategy.economic_description}</td></tr>`;

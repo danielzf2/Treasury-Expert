@@ -117,18 +117,12 @@ def compute_net_exposure(legs: list[dict]) -> dict:
     bags: dict[str, dict[str, list]] = {}
     all_entries: list[dict] = []
 
-    # Mapa instrumento -> DV01 total pra calcular cobertura
-    dv01_by_inst: dict[str, float] = {}
-    for leg in legs:
-        inst = leg["instrument"]
-        dv01_by_inst.setdefault(inst, 0.0)
-        dv01_by_inst[inst] += abs(leg.get("dv01_total", 0.0))
-
     for leg in legs:
         inst = leg["instrument"]
         direction = leg["direction"]
         taxa = leg.get("tax_fin", leg.get("taxa", 0))
         label = f"{direction} {inst} {leg.get('parsed', {}).get('label', leg.get('parsed_label', ''))}"
+        leg_dv01 = abs(leg.get("dv01_total", 0.0))
 
         exp = get_exposure(inst, direction, taxa)
 
@@ -142,7 +136,7 @@ def compute_net_exposure(legs: list[dict]) -> dict:
                     "rate": e["rate"],
                     "leg_label": label,
                     "instrument": inst,
-                    "dv01": dv01_by_inst.get(inst, 0.0),
+                    "dv01": leg_dv01,
                 })
                 all_entries.append({**e, "side": side, "leg_label": label})
 
@@ -713,7 +707,8 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                         "desc": f"Posicao trava a operacao em {bmk} {spread:+.2f} bps — abertura/fechamento do spread move o P&L direto"})
 
     # Inclinacao / Curvatura (titulos com cupom vs derivativo zero-coupon)
-    if has_cupom_tpf:
+    # Pula se hedge mode ja tratou (evita duplicidade)
+    if has_cupom_tpf and not coupon_tpf_with_hedge:
         tpf_legs = [l for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0]
         deriv_legs = [l for l in legs if l["instrument"] in ("DI1", "DAP")]
         for tpf_leg in tpf_legs:
@@ -735,7 +730,7 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                                 "desc": f"{tpf_inst} com cupom tem convexidade diferente de zero-coupon — P&L nao-linear em movimentos grandes"})
 
     # Convexidade (gamma) — quando TPF com cupom + derivativo, mostra D.Mac diff
-    if has_cupom_tpf and (has_di or has_dap):
+    if has_cupom_tpf and (has_di or has_dap) and not coupon_tpf_with_hedge:
         tpf_leg = next((l for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0), None)
         deriv_leg = next((l for l in legs if l["instrument"] in ("DI1", "DAP")), None)
         if tpf_leg and deriv_leg:

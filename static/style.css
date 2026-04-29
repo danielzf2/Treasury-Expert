@@ -426,29 +426,25 @@ header .subtitle { color: #8b949e; font-size: 12px; margin-top: 2px; }
 
 /* Colunas Ativo | Passivo com borda vertical separadora */
 .av-col-ativo {
-    border-left: 2px solid rgba(88,166,255,0.25) !important;
-    border-right: 2px solid #58a6ff !important;
+    border-left: 1px solid rgba(88,166,255,0.2) !important;
+    border-right: 2px solid rgba(88,166,255,0.5) !important;
 }
 .av-col-passivo {
-    border-right: 2px solid rgba(88,166,255,0.25) !important;
+    border-right: 1px solid rgba(88,166,255,0.2) !important;
 }
 
-/* Resultado liquido (linha RESULTADO) */
-.av-net-result td {
-    border-top: 2px dashed rgba(88,166,255,0.3) !important;
-    padding: 8px 16px !important;
+/* Fatores cancelados: strikethrough laranja */
+.av-cancelled {
+    text-decoration: line-through;
+    text-decoration-color: #d29922;
+    text-decoration-thickness: 2px;
+    opacity: 0.65;
 }
-.av-net-ativo, .av-net-passivo {
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    color: #e6edf3 !important;
-}
-.av-net-ativo {
-    border-left: 2px solid rgba(88,166,255,0.25) !important;
-    border-right: 2px solid #58a6ff !important;
-}
-.av-net-passivo {
-    border-right: 2px solid rgba(88,166,255,0.25) !important;
+
+/* Linha RESULTADO (mesma estrutura das pernas, sem barra azul separada) */
+.av-result-row td {
+    border-top: 2px solid rgba(88,166,255,0.4) !important;
+    background: rgba(88,166,255,0.04) !important;
 }
 
 /* Utility classes */
