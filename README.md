@@ -138,3 +138,54 @@ PYTHONPATH=casada-tool python server/app.py
 ```
 
 Site em `http://localhost:8000`, MCP em `http://localhost:8000/mcp`.
+
+## Adding New Documents
+
+### 1. Set up the API key (once)
+
+The converter uses the [Mistral AI](https://console.mistral.ai/) OCR API. Create a `.env` file at the project root:
+
+```bash
+echo 'MISTRAL_API_KEY=your-key-here' > .env
+```
+
+The `.env` is in `.gitignore` — your key never goes to the repository.
+
+### 2. Run the conversion
+
+```bash
+source .venv/bin/activate
+export $(grep -v '^#' .env | xargs)
+python scripts/convert_pdfs.py "path/to/file.pdf" --category books
+```
+
+For ANBIMA methodologies or similar:
+
+```bash
+python scripts/convert_pdfs.py "path/to/file.pdf" --category methodologies
+```
+
+### What the script does
+
+```
+PDF → Mistral OCR → Raw markdown → LaTeX sanitizer → docs/{category}/{slug}.md
+```
+
+1. Sends the PDF to Mistral OCR API (`mistral-ocr-latest`)
+2. Receives per-page markdown and assembles the file with YAML frontmatter
+3. Automatically runs `sanitize_latex.py` to clean LaTeX notation residues from OCR
+4. Writes the result to `docs/books/` or `docs/methodologies/`
+
+### Options
+
+| Flag | Effect |
+|---|---|
+| `--category books` | Write to `docs/books/` (default) |
+| `--category methodologies` | Write to `docs/methodologies/` |
+| `--output path/custom.md` | Custom output path |
+| `--overwrite` | Overwrite if `.md` already exists |
+
+### 3. Verify in the MCP
+
+After conversion, the MCP server detects the new file automatically (compares mtimes).
+To force: Ctrl+Shift+P → "MCP: Reload" in Cursor.
