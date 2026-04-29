@@ -201,29 +201,32 @@ def _build_result_label(cancelled: list[dict], residual: list[dict]) -> str:
     # CDI residual pos-cancelamento: se Pre cancelou com spread, resultado eh CDI + spread
     pre_cancel = next((c for c in cancelled if c["factor"] == "Pre"), None)
     ipca_cancel = next((c for c in cancelled if c["factor"] == "IPCA+"), None)
-    cdi_cancel = next((c for c in cancelled if c["factor"] == "CDI"), None)
 
+    base = ""
     if pre_cancel and pre_cancel["spread_bps"]:
-        return f"CDI {pre_cancel['spread_bps']:+.0f} bps"
-    if ipca_cancel and ipca_cancel["spread_bps"]:
-        return f"CDI {ipca_cancel['spread_bps']:+.0f} bps"
+        base = f"CDI {pre_cancel['spread_bps']:+.0f} bps"
+    elif ipca_cancel and ipca_cancel["spread_bps"]:
+        base = f"CDI {ipca_cancel['spread_bps']:+.0f} bps"
 
-    # Fatores residuais
+    # Fatores residuais (incluindo CDI quando relevante)
+    residual_parts: list[str] = []
     for r in residual:
         factor = r["factor"]
-        if factor == "CDI":
-            continue  # CDI puro sem contraparte = pos-fixado
         rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
         dir_str = "recebe" if r["direction"] == "recebe" else "paga"
-        parts.append(f"{dir_str} {factor}{rate_str}")
+        residual_parts.append(f"{dir_str} {factor}{rate_str}")
 
-    if not parts:
-        has_cdi = any(c["factor"] == "CDI" for c in cancelled) or any(r["factor"] == "CDI" for r in residual)
-        if has_cdi:
-            return "CDI puro (fatores cancelam)"
-        return "Posicao neutra"
+    if base and residual_parts:
+        return f"{base} + {' + '.join(residual_parts)}"
+    if base:
+        return base
+    if residual_parts:
+        return " | ".join(residual_parts)
 
-    return " | ".join(parts)
+    has_cdi = any(c["factor"] == "CDI" for c in cancelled) or any(r["factor"] == "CDI" for r in residual)
+    if has_cdi:
+        return "CDI puro (fatores cancelam)"
+    return "Posicao neutra"
 
 
 def _build_result_description(cancelled: list[dict], residual: list[dict]) -> str:
@@ -442,12 +445,12 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
         result["name"] = pair.get("name")
         result["bmk"] = pair.get("bmk")
         result["spread"] = pair.get("spread")
-        result["economic_description"] = _describe_strategy_economic(legs, pair)
-        # Preserva refs de legs usadas pelo hardcoded (pra hedge, serialize, etc)
         for k in ("tpf", "di", "dol", "frc", "ddi", "dap",
                    "dap_curto", "dap_longo", "cupom", "fwd", "cupom_dap"):
             if k in pair:
                 result[k] = pair[k]
+        # Descricao economica precisa do result completo (com net_exposure) pra citar pernas extras
+        result["economic_description"] = _describe_strategy_economic(legs, result)
 
     return result
 
@@ -464,29 +467,46 @@ def _describe_strategy_economic(legs: list[dict], strategy: dict) -> str:
     if typ == "casada":
         tpf = strategy.get("tpf", {})
         tpf_inst = tpf.get("instrument", "TPF")
+
+        # Pernas residuais alem do par (ex: 3a perna FRC em LTN+DI1+FRC)
+        net = strategy.get("net_exposure", {})
+        extra_residual = [
+            r for r in net.get("residual", [])
+            if r["factor"] not in ("CDI",)
+        ]
+        extra_str = ""
+        if extra_residual:
+            parts = [f"{r['direction']} {r['factor']} {r['rate_total']:.2f}%" if r["rate_total"] else f"{r['direction']} {r['factor']}" for r in extra_residual]
+            extra_str = f" Adicionalmente: {', '.join(parts)}."
+
         if tpf_inst == "NTN-B":
             is_venda = tpf.get("direction") == "V"
             if is_venda:
                 return (
                     "Venda Casada de NTN-B com Futuro de Cupom de IPCA (livro B3 DAP, cap.6). "
-                    "Vende NTN-B a vista + vende DAP - caixa rendendo CDI + spread real."
+                    "Vende NTN-B a vista + vende DAP — caixa rendendo CDI + spread real."
+                    + extra_str
                 )
             return (
                 "Carteira de NTN-B com Cupom de IPCA Flutuante (livro B3 DAP, cap.6). "
                 "Compra NTN-B + compra DAP transforma cupom real fixo em flutuante; "
                 "IPCA cancela e a posicao vira pos-fixada CDI + spread real."
+                + extra_str
             )
         # LTN ou NTN-F + DI1
         return (
             "Casada Pre (LTN/NTN-F + DI1 mesma direcao). "
             "TPF financiada via DI futuro; o fator pre cancela e a posicao vira "
             "pos-fixada CDI + spread."
+            + extra_str
         )
 
     if typ == "ntnb_sint":
+        dap_leg = strategy.get("di", {})
+        dap_dir = "vender" if dap_leg.get("direction") == "V" else "comprar"
         return (
-            "NTN-B Sintetica (Conversao de carteira de LFT em NTN-B, livro B3 DAP cap.6). "
-            "LFT recebe Selic ~CDI; comprar DAP transforma a rentabilidade em IPCA + cupom_DAP fixo."
+            f"NTN-B Sintetica (Conversao de carteira de LFT em NTN-B, livro B3 DAP cap.6). "
+            f"LFT recebe Selic ~CDI; {dap_dir} DAP transforma a rentabilidade em IPCA + cupom_DAP fixo."
         )
 
     if typ == "ipca_sint":
@@ -619,8 +639,6 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                 factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
                                 "desc": f"{c['factor']} cancela entre pernas"})
         for r in net["residual"]:
-            if r["factor"] == "CDI":
-                continue
             rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
             factors.append({"fator": r["factor"], "exposto": True,
                             "desc": f"{r['direction'].capitalize()} {r['factor']}{rate_str} ({', '.join(r['legs'])})"})
