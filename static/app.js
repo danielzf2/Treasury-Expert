@@ -3,23 +3,17 @@
 const ALL_INSTRUMENTS = ["LTN","NTN-F","NTN-B","LFT","DI1","DAP","DOL","DDI","FRC"];
 const CORR_TYPES = ["Nenhuma","% na taxa","R$/contrato","R$/titulo"];
 const SCENARIOS = {
-    bull_par:"Bull Parallel", bear_par:"Bear Parallel",
-    bull_steep:"Bull Steepener", bear_steep:"Bear Steepener",
-    bull_flat:"Bull Flattener", bear_flat:"Bear Flattener",
-    pos_fly:"Positive Butterfly", neg_fly:"Negative Butterfly",
-    custom:"Custom"
+    parallel:"Paralelo", steep:"Steepener", flat:"Flattener", fly:"Butterfly", custom:"Custom"
 };
 const SCENARIO_DESCS = {
-    bull_par:"Todas as taxas caem de forma paralela. Bom para posições compradas em duration.",
-    bear_par:"Todas as taxas sobem de forma paralela. Bom para posições vendidas em duration.",
-    bull_steep:"Curtos caem mais que longos. Mostra exposição a inclinação quando o vértice curto lidera o rally.",
-    bear_steep:"Longos sobem mais que curtos. Captura abertura de prêmio de prazo.",
-    bull_flat:"Longos caem mais que curtos. Útil para testar fechamento da parte longa.",
-    bear_flat:"Curtos sobem mais que longos. Útil em choque de política monetária no front-end da curva.",
-    pos_fly:"Barriga sobe e pontas caem. Testa risco de curvatura contra posições concentradas no miolo.",
-    neg_fly:"Barriga cai e pontas sobem. Testa ganho/perda em estruturas compradas na barriga.",
-    custom:"Combina paralelo, inclinação e curvatura com os sliders abaixo.",
+    parallel:"Shift paralelo. Positivo = taxas sobem, negativo = taxas caem.",
+    steep:"Inclinação. Positivo = longos sobem mais que curtos, negativo = curtos caem mais que longos.",
+    flat:"Achatamento. Positivo = curtos sobem mais que longos, negativo = longos caem mais que curtos.",
+    fly:"Curvatura (butterfly). Positivo = barriga sobe / pontas caem, negativo = oposto.",
+    custom:"Combina paralelo, inclinação e curvatura livremente.",
 };
+const _SCENARIO_POS_MAP = { parallel:"bear_par", steep:"bear_steep", flat:"bear_flat", fly:"pos_fly" };
+const _SCENARIO_NEG_MAP = { parallel:"bull_par", steep:"bull_steep", flat:"bull_flat", fly:"neg_fly" };
 
 function brDate() {
     const now = new Date();
@@ -47,7 +41,7 @@ const state = {
     anbimaTpfData: null,
     sourcesStatus: null,
     results: null,
-    scenarioKey: "bull_par",
+    scenarioKey: "parallel",
     magnitude: 10,
     customParallel: 0, customSlope: 0, customCurvature: 0,
     deltaFx: 0, deltaIpca: 0, deltaCupom: 0,
@@ -81,16 +75,24 @@ function applyPreset(name) {
 
 function switchTab(tab) {
     state.activeTab = tab;
-    document.querySelectorAll(".tabs button").forEach((b,i) => {
-        b.classList.toggle("active", ["sim","mkt","formulas"][i] === tab);
+    const tabs = ["sim","mkt","formulas","guia"];
+    document.querySelectorAll("#mainNav button").forEach((b,i) => {
+        b.classList.toggle("active", tabs[i] === tab);
     });
-    document.getElementById("tab-sim").style.display = tab === "sim" ? "" : "none";
-    document.getElementById("tab-mkt").style.display = tab === "mkt" ? "" : "none";
-    document.getElementById("tab-formulas").style.display = tab === "formulas" ? "" : "none";
+    tabs.forEach(t => {
+        const el = document.getElementById("tab-" + t);
+        if (el) el.style.display = t === tab ? "" : "none";
+    });
+    document.getElementById("mainNav").classList.remove("open");
 
-    if (tab === "sim" && state.activeSimSubTab === "cenarios") {
+    if (tab === "sim" && (state.activeSimSubTab === "cenarios" || state.activeSimSubTab === "detalhes")) {
         requestAnimationFrame(() => resizeScenarioCharts());
     }
+    if (tab === "guia") renderGuia();
+}
+
+function toggleMobileNav() {
+    document.getElementById("mainNav").classList.toggle("open");
 }
 
 function switchSimSubTab(name) {
@@ -102,7 +104,7 @@ function switchSimSubTab(name) {
     document.getElementById("subtab-cenarios").style.display = name === "cenarios" ? "" : "none";
     document.getElementById("subtab-detalhes").style.display = name === "detalhes" ? "" : "none";
 
-    if (name === "cenarios") {
+    if (name === "cenarios" || name === "detalhes") {
         requestAnimationFrame(() => resizeScenarioCharts());
     }
 }
@@ -113,6 +115,9 @@ function resizeScenarioCharts() {
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (el && el._fullLayout) Plotly.Plots.resize(id);
+    });
+    document.querySelectorAll('[id^="krdChart"]').forEach(el => {
+        if (el._fullLayout) Plotly.Plots.resize(el.id);
     });
 }
 
@@ -325,9 +330,6 @@ async function fetchMarketData() {
             sources,
         };
 
-        if (state.marketData) {
-            document.getElementById("mktTimestamp").textContent = `Atualizado: ${state.marketData.timestamp}`;
-        }
         Object.keys(_tickerCache).forEach(k => delete _tickerCache[k]);
         if (state.marketData) renderMarketIndicators();
         renderMarketDataTab();
@@ -336,19 +338,21 @@ async function fetchMarketData() {
             processLegs();
         }
     } catch(e) { console.error(e); }
-    btn.disabled = false; btn.textContent = "Atualizar Dados de Mercado";
+    btn.disabled = false; btn.textContent = "Atualizar";
 }
 
 function renderMarketIndicators() {
     const m = state.marketData; if (!m) return;
     const el = document.getElementById("mktIndicators");
-    el.style.display = "";
-    el.innerHTML = [
+    const items = [
         {l:"CDI", v:`${m.cdi_aa.toFixed(2)}%`},
         {l:"PTAX", v:m.ptax.toFixed(4)},
-        {l:"Spot USD", v:m.spot_usd > 0 ? `~${m.spot_usd.toFixed(2)}` : "--"},
-        {l:"Atualizado", v:m.timestamp},
-    ].map(({l,v}) => `<div class="metric"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+    ];
+    if (m.spot_usd > 0) items.push({l:"Spot", v:`~${m.spot_usd.toFixed(2)}`});
+    items.push({l:"", v:m.timestamp});
+    el.innerHTML = items.map(({l,v}) =>
+        `<span class="mkt-tag">${l ? `<span class="mkt-lbl">${l}</span>` : ''}<span class="mkt-val">${v}</span></span>`
+    ).join('<span class="mkt-sep">&middot;</span>');
     if (m.spot_usd > 0) document.getElementById("spotInput").value = m.spot_usd.toFixed(4);
 }
 
@@ -661,19 +665,20 @@ function renderCashflows(r, flowPnl=[]) {
         html += `<div class="metric"><div class="label">PV dos Fluxos</div><div class="value">${fmtMoney(cf.pv_total,2)}</div></div>`;
         html += `<div class="metric"><div class="label">Duration Macaulay</div><div class="value">${fmtNumber(cf.duration_macaulay,2)} anos</div></div>`;
         html += `<div class="metric"><div class="label">Duration ANBIMA</div><div class="value">${fmtNumber(cf.duration_anbima_du,0)} DU</div></div>`;
-        html += `<div class="metric"><div class="label">P&L por Fluxo</div><div class="value ${pnlMetricClass}">${pnl?fmtMoney(pnl.total,0):"--"}</div></div>`;
+        html += `<div class="metric scenario-metric"><div class="label">P&L por Fluxo</div><div class="value ${pnlMetricClass}">${pnl?fmtMoney(pnl.total,0):"--"}</div></div>`;
         html += '</div>';
         html += `<div id="krdChart${idx}" style="min-height:260px"></div>`;
-        html += '<div style="overflow-x:auto"><table class="sim-tbl"><tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">Nominal</th><th class="tr">PV</th><th class="tr">Peso</th><th class="tr">KRD</th><th class="tr">Delta</th><th class="tr">P&L</th></tr>';
+        const scLbl = _scenarioLabel();
+        html += `<div style="overflow-x:auto"><table class="sim-tbl"><tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">Nominal</th><th class="tr">PV</th><th class="tr">Peso</th><th class="tr">KRD</th><th class="tr scenario-col">Δ bps</th><th class="tr scenario-col">P&L (${scLbl})</th></tr>`;
         cf.flows.forEach(f => {
             const pf = pnl?.flows?.find(x => x.label === f.label && x.du === f.du);
             const pnlClass = pf ? (pf.pnl > 1 ? " green" : (pf.pnl < -1 ? " red" : "")) : "";
             html += `<tr><td>${f.label}</td><td class="mono">${f.payment_date || "--"}</td><td class="tc mono">${f.du}</td>`;
             html += `<td class="tr mono">${fmtMoney(f.nominal,2)}</td><td class="tr mono">${fmtMoney(f.pv,2)}</td>`;
             html += `<td class="tr mono">${fmtNumber(f.peso*100,1)}%</td><td class="tr mono">${fmtNumber(f.krd,4)}</td>`;
-            html += `<td class="tr mono">${pf?fmtNumber(pf.delta_bps,1)+" bps":"--"}</td><td class="tr mono${pnlClass}">${pf?fmtMoney(pf.pnl,0):"--"}</td></tr>`;
+            html += `<td class="tr mono scenario-cell">${pf?fmtNumber(pf.delta_bps,1)+" bps":"--"}</td><td class="tr mono scenario-cell${pnlClass}">${pf?fmtMoney(pf.pnl,0):"--"}</td></tr>`;
         });
-        html += `<tr class="av-result"><td>Total</td><td></td><td></td><td></td><td class="tr mono">${fmtMoney(cf.pv_total,2)}</td><td class="tr mono">100,0%</td><td class="tr mono">${fmtNumber(cf.duration_macaulay,4)}</td><td></td><td class="tr mono">${pnl?fmtMoney(pnl.total,0):"--"}</td></tr>`;
+        html += `<tr class="av-result"><td>Total</td><td></td><td></td><td></td><td class="tr mono">${fmtMoney(cf.pv_total,2)}</td><td class="tr mono">100,0%</td><td class="tr mono">${fmtNumber(cf.duration_macaulay,4)}</td><td class="scenario-cell"></td><td class="tr mono scenario-cell">${pnl?fmtMoney(pnl.total,0):"--"}</td></tr>`;
         html += '</table></div></div>';
     });
     el.innerHTML = html;
@@ -732,8 +737,8 @@ function renderHedge(r) {
     html += `<td class="tr mono">${h.n_at_duration}</td>`;
     html += `<td class="muted" style="font-size:10px">Casamento de DV01 no prazo médio — funciona bem para shifts paralelos</td></tr>`;
 
-    html += `<tr class="av-result"><td class="bold">3. Strip (Hedge Perfeito)</td><td class="tc">ver abaixo</td>`;
-    html += `<td></td><td class="tr mono bold">${h.n_strip_total || 0}</td>`;
+    html += `<tr><td class="bold">3. Strip (Hedge Perfeito)</td><td class="tc">ver abaixo</td>`;
+    html += `<td></td><td class="tr mono">${h.n_strip_total || 0}</td>`;
     html += `<td class="muted" style="font-size:10px">1 ${inst} por fluxo — elimina risco de inclinação e curvatura</td></tr>`;
     html += '</table></div>';
 
@@ -762,11 +767,13 @@ function renderHedge(r) {
 }
 
 function renderScenarios() {
-    if (!state.results) return;
+    const bar = document.getElementById("scenarioBar");
+    if (!state.results) { if (bar) bar.style.display = "none"; return; }
     const hasRateLegs = state.results.legs.some(l => l.info_conv !== "price");
     const hasDol = state.results.legs.some(l => l.instrument === "DOL");
-    if (!hasRateLegs && !hasDol) return;
+    if (!hasRateLegs && !hasDol) { if (bar) bar.style.display = "none"; return; }
 
+    if (bar) bar.style.display = "";
     renderScenarioRadio();
     renderSliders();
     loadCharts();
@@ -793,41 +800,56 @@ function renderSliders() {
     const hasCupom = r.legs.some(l => ["FRC","DDI"].includes(l.instrument)) || (r.legs.some(l=>l.instrument==="DOL") && r.legs.some(l=>l.instrument==="DI1"));
     const hasFx = r.legs.some(l => l.instrument === "DOL");
 
-    const preInsts = r.legs.filter(l => ["LTN","NTN-F","DI1"].includes(l.instrument)).map(l => l.instrument);
-    const preLabel = preInsts.length ? preInsts.filter((v,i,a)=>a.indexOf(v)===i).join(", ") : "DI1, LTN, NTN-F";
-
     const el = document.getElementById("slidersPanel");
-    let html = '<div class="slider-header">Choques de Cenário</div>';
-    html += '<p class="slider-hint">Mova os sliders para chocar taxas e ver o impacto no P&L. Positivo = direção do cenário, negativo = direção oposta.</p>';
+    const sliderLabels = {parallel:"Δ Taxa (bps)", steep:"Δ Inclinação (bps)", flat:"Δ Achatamento (bps)", fly:"Δ Curvatura (bps)"};
+    let html = '';
     if (state.scenarioKey === "custom") {
-        html += sliderHtml("Paralelo", "customParallel", state.customParallel, -50, 50, 1, "Shift uniforme em todos os vértices");
-        html += sliderHtml("Inclinação", "customSlope", state.customSlope, -50, 50, 1, "Diferença curto vs longo");
-        html += sliderHtml("Curvatura", "customCurvature", state.customCurvature, -50, 50, 1, "Barriga vs pontas");
+        html += sliderHtml("Paralelo (bps)", "customParallel", state.customParallel, -50, 50, 1);
+        html += sliderHtml("Inclinação (bps)", "customSlope", state.customSlope, -50, 50, 1);
+        html += sliderHtml("Curvatura (bps)", "customCurvature", state.customCurvature, -50, 50, 1);
     } else {
-        html += sliderHtml("Cenário (bps)", "magnitude", state.magnitude, -50, 50, 1, `Aplica o cenário selecionado a ${preLabel}`);
+        html += sliderHtml(sliderLabels[state.scenarioKey] || "Cenário (bps)", "magnitude", state.magnitude, -50, 50, 1);
     }
-    if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5, "Variação % no spot USD/BRL — afeta DOL");
-    if (hasIpca) html += sliderHtml("Taxa Real (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1, "Choque na taxa real IPCA — afeta NTN-B, DAP");
-    if (hasCupom) html += sliderHtml("Cup. Cambial (bps)", "deltaCupom", state.deltaCupom, -50, 50, 1, "Choque no cupom cambial — afeta FRC, DDI");
+    if (hasFx) html += sliderHtml("Câmbio (%)", "deltaFx", state.deltaFx, -10, 10, 0.5);
+    if (hasIpca) html += sliderHtml("Taxa Real (bps)", "deltaIpca", state.deltaIpca, -50, 50, 1);
+    if (hasCupom) html += sliderHtml("Cup. Cambial (bps)", "deltaCupom", state.deltaCupom, -50, 50, 1);
     el.innerHTML = html;
 }
 
-function sliderHtml(label, key, val, min, max, step, hint) {
+function sliderHtml(label, key, val, min, max, step) {
     return `<div class="slider-group">
         <label>${label} <span class="slider-val" id="val_${key}">${val}</span></label>
         <input type="range" min="${min}" max="${max}" step="${step}" value="${val}"
             oninput="state.${key}=+this.value;document.getElementById('val_${key}').textContent=this.value;loadCharts()">
-        ${hint ? `<div class="slider-hint">${hint}</div>` : ""}
     </div>`;
 }
 
+function _backendScenario() {
+    if (state.scenarioKey === "custom") return { scenario_key:"custom", magnitude:state.magnitude };
+    const map = state.magnitude >= 0 ? _SCENARIO_POS_MAP : _SCENARIO_NEG_MAP;
+    return { scenario_key: map[state.scenarioKey] || state.scenarioKey, magnitude: Math.abs(state.magnitude) };
+}
+
+function _scenarioLabel() {
+    if (state.scenarioKey === "custom") {
+        const p = [];
+        if (state.customParallel) p.push(`P${state.customParallel>0?"+":""}${state.customParallel}`);
+        if (state.customSlope) p.push(`S${state.customSlope>0?"+":""}${state.customSlope}`);
+        if (state.customCurvature) p.push(`C${state.customCurvature>0?"+":""}${state.customCurvature}`);
+        return p.length ? `Custom ${p.join(" ")}` : "Custom 0";
+    }
+    const name = SCENARIOS[state.scenarioKey] || state.scenarioKey;
+    const m = state.magnitude;
+    return `${name} ${m>=0?"+":""}${m} bps`;
+}
+
 function _scenarioBase() {
-    /* payload comum dos endpoints de chart e P&L. */
     const r = state.results;
+    const sc = _backendScenario();
     return {
         legs: r ? r.legs : [],
-        scenario_key: state.scenarioKey,
-        magnitude: state.magnitude,
+        scenario_key: sc.scenario_key,
+        magnitude: sc.magnitude,
         delta_fx_pct: state.deltaFx,
         delta_ipca_bps: state.deltaIpca,
         delta_cupom_bps: state.deltaCupom,
@@ -864,22 +886,22 @@ function _activeCharts(legs, strategy) {
     if (hasCupom) charts.push({id:"cupom", label:"Cupom Cambial (FRC)", divId:"chartCupom",
          url:"/sim/charts/cupom",
          body:{frc_contracts:frc, delta_cupom_bps:state.deltaCupom, legs:legs,
-               scenario_key:state.scenarioKey, magnitude:state.magnitude,
-               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
-               custom_curvature_bps:state.customCurvature}});
+               scenario_key:base.scenario_key, magnitude:base.magnitude,
+               custom_parallel_bps:base.custom_parallel_bps, custom_slope_bps:base.custom_slope_bps,
+               custom_curvature_bps:base.custom_curvature_bps}});
     if (hasFwd) charts.push({id:"forward", label:"Dólar Forward", divId:"chartForward",
          url:"/sim/charts/forward",
          body:{di1, frc, spot, delta_pre_bps:0,
                delta_cupom_bps:state.deltaCupom, delta_fx_pct:state.deltaFx,
-               legs:legs, scenario_key:state.scenarioKey, magnitude:state.magnitude,
-               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
-               custom_curvature_bps:state.customCurvature}});
+               legs:legs, scenario_key:base.scenario_key, magnitude:base.magnitude,
+               custom_parallel_bps:base.custom_parallel_bps, custom_slope_bps:base.custom_slope_bps,
+               custom_curvature_bps:base.custom_curvature_bps}});
     if (hasIpca) charts.push({id:"real", label:"Taxa Real (DAP)", divId:"chartReal",
          url:"/sim/charts/real",
          body:{dap_contracts:dap, delta_ipca_bps:state.deltaIpca, legs:legs,
-               scenario_key:state.scenarioKey, magnitude:state.magnitude,
-               custom_parallel_bps:state.customParallel, custom_slope_bps:state.customSlope,
-               custom_curvature_bps:state.customCurvature}});
+               scenario_key:base.scenario_key, magnitude:base.magnitude,
+               custom_parallel_bps:base.custom_parallel_bps, custom_slope_bps:base.custom_slope_bps,
+               custom_curvature_bps:base.custom_curvature_bps}});
 
     return charts;
 }
@@ -943,7 +965,7 @@ async function loadCharts() {
     if (mtm && mtm.total_pnl !== undefined) {
         document.getElementById("pnlTotal").innerHTML =
             `<div class="pnl-hero">
-                <div class="pnl-hero-label">P&L Total do Cenário</div>
+                <div class="pnl-hero-label">P&L — ${_scenarioLabel()}</div>
                 <div class="pnl-hero-value ${mtm.total_pnl>=0?"green":"red"}">R$ ${mtm.total_pnl>=0?"+":""}${mtm.total_pnl.toLocaleString("pt-BR",{maximumFractionDigits:0})}</div>
             </div>`;
     }
@@ -987,7 +1009,7 @@ function renderDecomposition(dec) {
     const mode = state.decompositionMode || "minimal";
     const headerHtml = `
         <div class="decomposition-head">
-            <h3>Decomposição por perna <span class="muted" style="font-weight:400;font-size:11px">— efeito do cenario + sliders aplicado a cada fator</span></h3>
+            <h3 style="color:#d29922">Decomposição por perna <span class="muted" style="font-weight:400;font-size:11px">— efeito do cenário aplicado a cada fator</span></h3>
             <div style="display:flex;gap:6px">
                 <button class="btn-toggle ${mode==='minimal'?'active':''}" onclick="state.decompositionMode='minimal';renderDecomposition(window._lastDecomposition)">Minimal</button>
                 <button class="btn-toggle ${mode==='rich'?'active':''}" onclick="state.decompositionMode='rich';renderDecomposition(window._lastDecomposition)">Detalhar</button>
@@ -1069,7 +1091,7 @@ function renderMtmTable(table, legs) {
         autoIdxs.forEach(i => cols.push({label: `AUTO ${legs[i].instrument} ${legs[i].parsed_label}`, idxs: [i], isAuto: true}));
     }
 
-    let html = '<div class="sim-card"><div class="sim-card-h">Tabela de Cenários MtM (per-leg P&L)</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
+    let html = '<div class="sim-card scenario-card"><div class="sim-card-h">Tabela de Cenários MtM — per-leg P&L</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
     cols.forEach(c => html += `<th class="tr${c.isAuto?' muted':''}">${c.label}</th>`);
     html += '<th class="tr bold">Total</th></tr>';
     table.forEach(row => {
@@ -1374,3 +1396,165 @@ window.addEventListener("resize", () => {
     clearTimeout(_resizeTimer);
     _resizeTimer = setTimeout(() => resizeScenarioCharts(), 200);
 });
+
+
+// ============================================================================
+// Aba: Guia de Instrumentos
+// ============================================================================
+
+let _guiaRendered = false;
+
+function renderGuia() {
+    if (_guiaRendered) return;
+    _guiaRendered = true;
+    const el = document.getElementById("guiaContent");
+    if (!el) return;
+
+    const instruments = [
+        {
+            name: "LTN", full: "Letra do Tesouro Nacional",
+            type: "Titulo Publico Federal (TPF)", benchmark: "Pre-fixado",
+            negociacao: "Compra taxa (vende PU) / Venda taxa (compra PU). Negocia-se pela taxa % a.a. no mercado secundario.",
+            convencao: "Base 252 DU, capitalizacao exponencial. Liquidacao D+1 (a termo) ou D+0 (a vista).",
+            formula: "PU = 1.000 / (1 + taxa/100)^(du/252)",
+            truncamento: "Exponencial T-14, PU T-6 (metodologia ANBIMA)",
+            cupom: "Nao paga cupom (zero-coupon). Pagamento unico no vencimento.",
+            vencimento: "Dia 1 do mes de vencimento (meses padrao: Jan, Abr, Jul, Out).",
+            swap_equiv: "Compra LTN = ativo Pre X%. Venda = passivo Pre X%.",
+            casada: "LTN + DI1 (mesma direcao, mesmo vcto) = pos-fixada CDI + spread.",
+            dica: "Instrumento mais simples do mercado. Usado como referencia de taxa pre pra prazos curtos/medios. Junto com DI1 forma a 'casada' que trava o spread titulo-futuro.",
+        },
+        {
+            name: "NTN-F", full: "Nota do Tesouro Nacional serie F",
+            type: "TPF", benchmark: "Pre-fixado com cupom",
+            negociacao: "Igual LTN: negocia-se pela taxa % a.a. O PU reflete o fluxo de cupons descontado.",
+            convencao: "Base 252 DU, exponencial. Cupom semestral de 10% a.a. = 4,880885% por semestre (A-6).",
+            formula: "PU = Soma[Cupom x VN / (1+TIR)^(dui/252)] + VN / (1+TIR)^(dun/252)",
+            truncamento: "Exponencial T-14, fluxos descontados A-9, PU T-6",
+            cupom: "Cupom semestral de 10% a.a. sobre VN = R$ 1.000.",
+            vencimento: "Dia 1 do mes. Prazos longos (5, 7, 10 anos).",
+            swap_equiv: "Compra NTN-F = ativo Pre X% (cupom 10% embutido). Venda = passivo Pre X%.",
+            casada: "NTN-F + DI1 = CDI + spread. Duration do DI descasa com NTN-F (tem cupom).",
+            dica: "Titulo com cupom: duration menor que LTN de mesmo prazo. Exposto a inclinacao e curvatura da curva pre. Hedge por DV01 requer atencao ao mismatch de convexidade.",
+        },
+        {
+            name: "NTN-B", full: "Nota do Tesouro Nacional serie B (Tesouro IPCA+)",
+            type: "TPF", benchmark: "IPCA + taxa real",
+            negociacao: "Negocia-se pela taxa real % a.a. PU = Cotacao/100 x VNA. VNA atualizado diariamente pelo IPCA.",
+            convencao: "Base 252 DU, exponencial. Cupom real semestral de 6% a.a. = 2,956301% por semestre (A-6).",
+            formula: "Cotacao(%) = Soma[Cupom% / (1+TIR)^(dui/252)] + 100 / (1+TIR)^(dun/252)\nPU = (Cotacao / 100) x VNA",
+            truncamento: "Exponencial T-14, fluxos A-10, Cotacao T-4 (%), VNA T-6, PU T-6",
+            cupom: "Cupom real semestral de 6% a.a. sobre VNA (corrigido por IPCA).",
+            vencimento: "Dia 15 do mes (Mai ou Ago). Prazos de 3 a 40 anos.",
+            swap_equiv: "Compra NTN-B = ativo IPCA+ X%. Venda = passivo IPCA+ X%.",
+            casada: "NTN-B + DAP (mesma direcao) = Carteira IPCA Flutuante = CDI + spread real (livro B3 DAP).",
+            dica: "Protecao contra inflacao. VNA atualizado diariamente pelo IPCA pro-rata. O spread vs DAP (casada) reflete premio de credito/liquidez do titulo vs derivativo.",
+        },
+        {
+            name: "LFT", full: "Letra Financeira do Tesouro (Tesouro Selic)",
+            type: "TPF", benchmark: "Selic + agio/desagio",
+            negociacao: "Negocia-se pelo agio/desagio em bps sobre a Selic. Cotacao(%) x VNA_Selic = PU.",
+            convencao: "VNA atualizado diariamente pela taxa Selic. Base 252 DU.",
+            formula: "Cotacao(%) = 100 / (1 + rentabilidade/100)^(du/252)\nPU = (Cotacao / 100) x VNA_Selic",
+            truncamento: "Exponencial T-14, Cotacao T-4 (%), VNA T-6, PU T-6",
+            cupom: "Nao paga cupom. Remuneracao via atualizacao diaria do VNA pela Selic.",
+            vencimento: "Dia 1 do mes (Mar ou Set tipicamente).",
+            swap_equiv: "Compra LFT = ativo Selic+ X bps (X = agio/desagio).",
+            casada: "LFT + V DAP = NTN-B Sintetica (Selic cancela com CDI do DAP, sobra IPCA+cupom).",
+            dica: "Duration efetiva proxima de zero (pos-fixada). Usado como 'caixa' de fundos. Agio/desagio reflete expectativa de Selic vs mercado.",
+        },
+        {
+            name: "DI1", full: "Contrato Futuro de Taxa Media de DI",
+            type: "Derivativo (B3)", benchmark: "CDI / Pre",
+            negociacao: "Negocia-se pela TAXA % a.a. Quem COMPRA taxa fica VENDIDO em PU (aposta que taxa sobe). Quem VENDE taxa fica COMPRADO em PU.",
+            convencao: "Face R$ 100.000 no vencimento. Base 252 DU, exponencial. Ajuste diario.",
+            formula: "PU = 100.000 / (1 + taxa/100)^(du/252)",
+            truncamento: "Sem truncamento ANBIMA (derivativo, nao TPF).",
+            cupom: "Sem cupom. Ajuste diario pela diferenca de PU corrigido pelo CDI.",
+            vencimento: "1o DU do mes. Liquidez nos meses de Jan, com vencimentos ate 10+ anos.",
+            swap_equiv: "Compra DI1 (compra taxa) = ativo CDI, passivo Pre X%. Venda DI1 = ativo Pre X%, passivo CDI.",
+            casada: "DI1 + LTN/NTN-F = casada pre (CDI + spread). DI1 + V DAP = IPCA sintetico.",
+            dica: "Instrumento mais liquido do mercado brasileiro. Contraparte de quase toda estrategia de renda fixa. Ajuste diario: PO corrigido pelo CDI vs PA do dia.",
+        },
+        {
+            name: "DAP", full: "Contrato Futuro de Cupom de IPCA",
+            type: "Derivativo (B3)", benchmark: "Cupom real (IPCA)",
+            negociacao: "Negocia-se pelo CUPOM IPCA % a.a. Compra DAP = compra CDI, vende IPCA+cupom (swap equivalente livro B3).",
+            convencao: "Face R$ 100.000. Base 252 DU, exponencial. Ajuste com CDI e IPCA.",
+            formula: "PU = 100.000 / (1 + cupom/100)^(du/252)",
+            truncamento: "Sem truncamento ANBIMA.",
+            cupom: "Sem cupom explicito. Ajuste diario envolve CDI (numerador) e IPCA (denominador).",
+            vencimento: "Dia 15 do mes (mesmo calendario NTN-B).",
+            swap_equiv: "Compra DAP = ativo CDI (DI Over), passivo IPCA+ cupom (livro B3 DAP, Swap Equivalente).",
+            casada: "NTN-B + DAP (C+C) = IPCA Flutuante = CDI. LFT + V DAP = NTN-B Sintetica. DI1 + V DAP = Hedge IPCA Sintetico.",
+            dica: "Equivalente a um swap CDI vs IPCA+cupom. Permite montar/desmontar exposicao a inflacao sem negociar o titulo fisico. DV01 tipicamente menor que NTN-B (zero-coupon vs cupom).",
+        },
+        {
+            name: "DOL", full: "Contrato Futuro de Dolar",
+            type: "Derivativo (B3)", benchmark: "USD/BRL",
+            negociacao: "Negocia-se pela COTACAO em pontos (R$ por USD 1.000). Compra = aposta dolar sobe.",
+            convencao: "Cada ponto = R$ 0,50 por contrato. Tamanho: USD 50.000. Ajuste diario.",
+            formula: "PU = cotacao (preco direto). P&L = (cotacao_nova - cotacao_antiga) x R$ 50 x contratos.",
+            truncamento: "N/A (preco direto).",
+            cupom: "Sem cupom. Ajuste diario pela variacao da cotacao.",
+            vencimento: "1o DU do mes.",
+            swap_equiv: "Compra DOL = ativo USD/BRL (exposicao cambial pura).",
+            casada: "DOL + DI1 (C+C) = Cupom Cambial Sintetico. DOL isolado = direcional cambio.",
+            dica: "Liquidez concentrada no 1o vencimento. Minicontrato WDO = USD 10.000 (20% do DOL). Paridade coberta: DOL = Spot x (1+pre)^(du/252) / (1+cupom_cambial x dc/360).",
+        },
+        {
+            name: "DDI", full: "Contrato Futuro de Cupom Cambial (Cupom Sujo)",
+            type: "Derivativo (B3)", benchmark: "Cupom cambial sujo",
+            negociacao: "Negocia-se pelo cupom cambial % a.a. linear base 360 DC. Cupom 'sujo' = usa PTAX do dia anterior (nao spot).",
+            convencao: "Face USD 100.000 (efetivo USD 50.000). Linear 360 DC.",
+            formula: "PU = 100.000 / (1 + cupom/100 x dc/360)",
+            truncamento: "N/A.",
+            cupom: "Sem cupom. Ajuste diario.",
+            vencimento: "1o DU do mes.",
+            swap_equiv: "Compra DDI = ativo CDI, passivo CupSujo X%.",
+            casada: "DI1 + V DDI = dolar sintetico (similar a DI1+FRC).",
+            dica: "Diferenca vs FRC: DDI usa PTAX (cupom 'sujo'), FRC usa casado (cupom 'limpo'). Na pratica, FRC tem mais liquidez em prazos medios/longos.",
+        },
+        {
+            name: "FRC", full: "FRA de Cupom Cambial (Cupom Limpo)",
+            type: "Derivativo (B3)", benchmark: "Cupom cambial limpo",
+            negociacao: "Negocia-se pelo cupom cambial % a.a. linear base 360 DC. Cupom 'limpo' = taxa forward entre 2 vencimentos de DDI.",
+            convencao: "Face USD 50.000. Linear 360 DC. Equivale a comprar DDI longo e vender DDI curto.",
+            formula: "PU = 50.000 / (1 + cupom/100 x dc/360)",
+            truncamento: "N/A.",
+            cupom: "Sem cupom. Ajuste diario.",
+            vencimento: "1o DU do mes (Jan, Abr, Jul, Out nos prazos longos).",
+            swap_equiv: "Compra FRC = ativo CDI, passivo CupLimpo X%.",
+            casada: "DI1 + V FRC = Dolar Sintetico (forward USD/BRL implicito via paridade coberta).",
+            dica: "Instrumento principal pra negociar cupom cambial. Mais liquido que DDI nos prazos medios. A curva FRC eh a referencia de cupom cambial limpo do mercado.",
+        },
+    ];
+
+    let html = '<div style="max-width:1100px">';
+    html += '<h2 style="font-size:18px;margin-bottom:4px">Guia de Instrumentos</h2>';
+    html += '<p class="muted" style="font-size:12px;margin-bottom:20px">Como funciona cada instrumento negociado no simulador. Fonte: livros B3 (DAP, Derivativos), ANBIMA e treasury-docs.</p>';
+
+    instruments.forEach(inst => {
+        html += `<div class="guia-card">
+            <div class="guia-header">
+                <span class="guia-name">${inst.name}</span>
+                <span class="guia-full">${inst.full}</span>
+                <span class="guia-type">${inst.type} · ${inst.benchmark}</span>
+            </div>
+            <div class="guia-body">
+                <div class="guia-row"><span class="guia-label">Negociacao</span><span>${inst.negociacao}</span></div>
+                <div class="guia-row"><span class="guia-label">Convencao</span><span>${inst.convencao}</span></div>
+                <div class="guia-row"><span class="guia-label">Formula</span><span class="mono" style="white-space:pre-line">${inst.formula}</span></div>
+                <div class="guia-row"><span class="guia-label">Truncamento</span><span>${inst.truncamento}</span></div>
+                <div class="guia-row"><span class="guia-label">Cupom</span><span>${inst.cupom}</span></div>
+                <div class="guia-row"><span class="guia-label">Vencimento</span><span>${inst.vencimento}</span></div>
+                <div class="guia-row"><span class="guia-label">Swap equiv.</span><span>${inst.swap_equiv}</span></div>
+                <div class="guia-row"><span class="guia-label">Casada / Combinacoes</span><span>${inst.casada}</span></div>
+                <div class="guia-row guia-dica"><span class="guia-label">Dica pratica</span><span>${inst.dica}</span></div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    el.innerHTML = html;
+}

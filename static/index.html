@@ -18,115 +18,85 @@
 </head>
 <body>
     <header>
-        <div class="container">
-            <h1>Simulador TPF + Derivativos</h1>
-            <p class="subtitle">TPF (LTN, NTN-F, NTN-B, LFT) + Derivativos (DI1, DAP, DOL, DDI, FRC)</p>
+        <div class="header-inner">
+            <span class="header-logo">Treasury Expert</span>
+            <nav class="header-nav" id="mainNav">
+                <button class="active" onclick="switchTab('sim')">Simulador</button>
+                <button onclick="switchTab('mkt')">Mercado</button>
+                <button onclick="switchTab('formulas')">Fórmulas</button>
+                <button onclick="switchTab('guia')">Guia</button>
+            </nav>
+            <button class="header-hamburger" id="hamburgerBtn" onclick="toggleMobileNav()">&#9776;</button>
         </div>
     </header>
 
     <div class="container">
-        <!-- Config row -->
         <div class="config-row">
             <div>
                 <label>Data Negociação</label>
                 <input type="date" id="dataNeg">
             </div>
             <div>
-                <label>Spot USD (R$/USD)</label>
+                <label>Spot USD</label>
                 <input type="number" id="spotInput" value="4.9724" step="0.0001" min="0">
             </div>
-            <button class="btn-primary" id="btnFetchMarket" onclick="fetchMarketData()">Atualizar Dados de Mercado</button>
-            <div id="mktTimestamp" class="muted" style="font-size:11px; align-self:center"></div>
-        </div>
-
-        <!-- Market indicators -->
-        <div class="mkt-indicators" id="mktIndicators" style="display:none"></div>
-
-        <!-- Tabs -->
-        <div class="tabs" role="tablist">
-            <button class="active" role="tab" aria-selected="true" onclick="switchTab('sim')">Simulador</button>
-            <button role="tab" aria-selected="false" onclick="switchTab('mkt')">Dados de Mercado</button>
-            <button role="tab" aria-selected="false" onclick="switchTab('formulas')">Fórmulas</button>
+            <button class="btn-primary" id="btnFetchMarket" onclick="fetchMarketData()">Atualizar</button>
+            <div class="mkt-inline" id="mktIndicators"></div>
         </div>
 
         <!-- Tab: Simulador -->
         <div id="tab-sim" role="tabpanel">
-            <!-- Sub-tabs dentro do Simulador -->
             <div class="sub-tabs" role="tablist" id="simSubTabs">
                 <button class="active" role="tab" aria-selected="true" onclick="switchSimSubTab('pernas')">Pernas &amp; Resumo</button>
                 <button role="tab" aria-selected="false" onclick="switchSimSubTab('cenarios')">Cenários &amp; P&amp;L</button>
                 <button role="tab" aria-selected="false" onclick="switchSimSubTab('detalhes')">Detalhes &amp; Hedge</button>
             </div>
 
+            <!-- Scenario bar — always visible when results exist -->
+            <div class="scenario-bar" id="scenarioBar" style="display:none">
+                <div class="scenario-radio" id="scenarioRadio"></div>
+                <div id="scenarioDesc" class="muted" style="font-size:11px; margin-bottom:6px"></div>
+                <div class="scenario-bar-body">
+                    <div class="sliders-panel" id="slidersPanel"></div>
+                    <div id="pnlTotal"></div>
+                </div>
+            </div>
+
             <!-- Sub-aba: Pernas & Resumo -->
             <div id="subtab-pernas" role="tabpanel">
-                <!-- Presets -->
                 <div class="presets" id="presets"></div>
-
-                <!-- Leg inputs -->
                 <div class="sec-h">Pernas da Operação</div>
                 <div id="legsHeader" class="leg-row is-header" style="margin-bottom:4px"></div>
                 <div id="legsContainer" class="legs-container"></div>
                 <button class="btn-add" onclick="addLeg()">+ Adicionar Perna</button>
-
                 <hr class="divider">
-
-                <!-- Summary -->
                 <div id="metricsArea"></div>
-
                 <div class="sec-h">Ativo vs Passivo</div>
                 <div id="avTable"></div>
-
                 <div id="riskFactors"></div>
             </div>
 
             <!-- Sub-aba: Cenários & P&L -->
             <div id="subtab-cenarios" role="tabpanel" style="display:none">
-                <!-- ============================================================
-                     SCENARIO ANALYSIS — controls + all scenario-dependent outputs
-                     ============================================================ -->
-                <div class="scenario-block">
-                    <div class="sec-h">Análise de Cenários</div>
-                    <div class="scenario-radio" id="scenarioRadio"></div>
-                    <div id="scenarioDesc" class="muted" style="font-size:12px; margin-bottom:8px"></div>
-
-                    <div class="scenario-grid">
-                        <div class="charts-grid" id="chartsGrid"></div>
-                        <div class="sliders-panel" id="slidersPanel"></div>
-                    </div>
-
-                    <div id="decompositionPanel" class="decomposition-panel"></div>
-
-                    <div id="pnlBarsChart"></div>
-                    <div id="pnlTotal" class="metrics" style="grid-template-columns:1fr"></div>
-
-                    <div id="mtmTable"></div>
-
-                    <div class="two-col">
-                        <div id="pnlConsolidatedChart"></div>
-                        <div>
-                            <div id="pnlPerLegToggle" style="margin-bottom:8px"></div>
-                            <div id="pnlPerLegChart"></div>
-                        </div>
+                <div class="charts-grid" id="chartsGrid"></div>
+                <div id="decompositionPanel" class="decomposition-panel"></div>
+                <div id="pnlBarsChart"></div>
+                <div id="mtmTable"></div>
+                <div class="two-col">
+                    <div id="pnlConsolidatedChart"></div>
+                    <div>
+                        <div id="pnlPerLegToggle" style="margin-bottom:8px"></div>
+                        <div id="pnlPerLegChart"></div>
                     </div>
                 </div>
             </div>
 
             <!-- Sub-aba: Detalhes & Hedge -->
             <div id="subtab-detalhes" role="tabpanel" style="display:none">
-                <!-- ============================================================
-                     DETAILS — static analysis, cashflows, hedge
-                     ============================================================ -->
                 <div class="sec-h">Detalhes das Pernas</div>
                 <div id="detailsTable" class="details-wrap"></div>
-
-                <!-- Spread & Costs -->
                 <div id="spreadCosts"></div>
-
-                <!-- Cashflows / KRD -->
                 <div id="krdSection"></div>
-
-                <!-- Hedge Modes -->
                 <div id="hedgeSection"></div>
             </div>
         </div>
@@ -141,6 +111,11 @@
         <!-- Tab: Fórmulas -->
         <div id="tab-formulas" role="tabpanel" style="display:none">
             <div id="formulasContent"></div>
+        </div>
+
+        <!-- Tab: Guia de Instrumentos -->
+        <div id="tab-guia" role="tabpanel" style="display:none">
+            <div id="guiaContent"></div>
         </div>
     </div>
 
