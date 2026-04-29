@@ -303,7 +303,7 @@ def chart_pnl_consolidado(legs: list[dict],
                            custom_parallel_bps: float = 0.0,
                            custom_slope_bps: float = 0.0,
                            custom_curvature_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(-20, 21))
+    deltas_range = list(range(0, 21))
     du_min, du_max = _rate_du_range(legs)
     total_pnl = []
     for d in deltas_range:
@@ -342,7 +342,7 @@ def chart_pnl_por_perna(legs: list[dict],
                          custom_parallel_bps: float = 0.0,
                          custom_slope_bps: float = 0.0,
                          custom_curvature_bps: float = 0.0) -> go.Figure:
-    deltas_range = list(range(-20, 21))
+    deltas_range = list(range(0, 21))
     du_min, du_max = _rate_du_range(legs)
     fig = go.Figure()
     for i, l in enumerate(legs):

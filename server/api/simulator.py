@@ -212,34 +212,50 @@ def _serialize_hedge(hedge: dict | None) -> dict | None:
 
 def _cashflow_breakdown(leg: dict) -> dict | None:
     info = leg.get("info")
-    if not info or info.cup_sem <= 0:
-        return None
-
-    flows = key_rate_duration(
-        leg["instrument"],
-        leg["taxa"],
-        leg["du"],
-        leg.get("liq"),
-        leg.get("parsed", {}).get("date"),
-    )
-    if not flows:
+    if not info or info.type != "tpf":
         return None
 
     rows = []
-    pv_total = sum(f.pv for f in flows)
-    duration_macaulay = sum(f.krd for f in flows)
-    duration_anbima_du = sum(f.du * f.pv for f in flows) / pv_total if pv_total else 0.0
+    if info.cup_sem > 0:
+        flows = key_rate_duration(
+            leg["instrument"],
+            leg["taxa"],
+            leg["du"],
+            leg.get("liq"),
+            leg.get("parsed", {}).get("date"),
+        )
+        if not flows:
+            return None
 
-    for f in flows:
+        pv_total = sum(f.pv for f in flows)
+        duration_macaulay = sum(f.krd for f in flows)
+        duration_anbima_du = sum(f.du * f.pv for f in flows) / pv_total if pv_total else 0.0
+
+        for f in flows:
+            rows.append({
+                "label": f.label,
+                "payment_date": f.payment_date.strftime("%d/%m/%Y") if f.payment_date else "",
+                "du": f.du,
+                "t_anos": f.t_anos,
+                "nominal": f.nominal,
+                "pv": f.pv,
+                "peso": f.peso,
+                "krd": f.krd,
+            })
+    else:
+        venc = leg.get("parsed", {}).get("date")
+        duration_macaulay = leg["d_mac"]
+        duration_anbima_du = leg["du"]
+        pv_total = leg["pu"]
         rows.append({
-            "label": f.label,
-            "payment_date": f.payment_date.strftime("%d/%m/%Y") if f.payment_date else "",
-            "du": f.du,
-            "t_anos": f.t_anos,
-            "nominal": f.nominal,
-            "pv": f.pv,
-            "peso": f.peso,
-            "krd": f.krd,
+            "label": "Principal",
+            "payment_date": venc.strftime("%d/%m/%Y") if isinstance(venc, date) else "",
+            "du": leg["du"],
+            "t_anos": leg["du"] / 252,
+            "nominal": info.face,
+            "pv": leg["pu"],
+            "peso": 1.0,
+            "krd": duration_macaulay,
         })
 
     return {
@@ -649,7 +665,7 @@ def get_tickers(instrument: str):
 # 12. POST /mtm-table
 # ---------------------------------------------------------------------------
 
-_MTM_STEPS = [-20, -15, -10, -5, -2, -1, 0, 1, 2, 5, 10, 15, 20]
+_MTM_STEPS = [0, 1, 2, 5, 10, 15, 20]
 
 
 def _flow_pnl_for_leg(leg: dict, req: MtmTableRequest,

@@ -302,12 +302,13 @@ function renderCashflows(r, flowPnl=[]) {
     legs.forEach((l, idx) => {
         const cf = l.cashflows;
         const pnl = pnlByLeg.get(`${l.instrument}:${l.ticker}:${l.direction}`);
+        const pnlMetricClass = pnl ? (pnl.total >= 0 ? "green" : "red") : "";
         html += `<div class="sim-card"><div class="sim-card-h">Fluxos, Cupons e Principal — ${l.instrument} ${l.parsed_label}</div>`;
         html += '<div class="metrics">';
         html += `<div class="metric"><div class="label">PV dos Fluxos</div><div class="value">${fmtMoney(cf.pv_total,2)}</div></div>`;
         html += `<div class="metric"><div class="label">Duration Macaulay</div><div class="value">${fmtNumber(cf.duration_macaulay,2)} anos</div></div>`;
         html += `<div class="metric"><div class="label">Duration ANBIMA</div><div class="value">${fmtNumber(cf.duration_anbima_du,0)} DU</div></div>`;
-        html += `<div class="metric"><div class="label">P&L por Fluxo</div><div class="value ${pnl && pnl.total>=0?"green":"red"}">${pnl?fmtMoney(pnl.total,0):"--"}</div></div>`;
+        html += `<div class="metric"><div class="label">P&L por Fluxo</div><div class="value ${pnlMetricClass}">${pnl?fmtMoney(pnl.total,0):"--"}</div></div>`;
         html += '</div>';
         html += `<div id="krdChart${idx}" style="min-height:260px"></div>`;
         html += '<div style="overflow-x:auto"><table class="sim-tbl"><tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">Nominal</th><th class="tr">PV</th><th class="tr">Peso</th><th class="tr">KRD</th><th class="tr">Delta</th><th class="tr">P&L</th></tr>';
@@ -477,12 +478,12 @@ async function switchChartTab(tab) {
 function renderMtmTable(table, legs) {
     const el = document.getElementById("mtmTable");
     const legLabels = legs.map(l => `${l.instrument} ${l.parsed_label}`);
-    let html = '<div class="sim-card"><div class="sim-card-h">Tabela de Cenários MtM (per-leg P&L)</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Delta (bps)</th>';
+    let html = '<div class="sim-card"><div class="sim-card-h">Tabela de Cenários MtM (per-leg P&L)</div><div style="overflow-x:auto"><table class="sim-tbl"><tr><th class="tc">Magnitude (bps)</th>';
     legLabels.forEach(lbl => html += `<th class="tr">${lbl}</th>`);
     html += '<th class="tr bold">Total</th></tr>';
     table.forEach(row => {
         const bg = row.delta === 0 ? ' style="background:#1c2128"' : '';
-        html += `<tr${bg}><td class="tc mono">${row.delta>=0?"+":""}${row.delta}</td>`;
+        html += `<tr${bg}><td class="tc mono">${row.delta}</td>`;
         row.pnls.forEach(pnl => {
             const cc = pnl > 1 ? " green" : (pnl < -1 ? " red" : "");
             html += `<td class="tr mono${cc}">R$ ${pnl>=0?"+":""}${Math.round(pnl).toLocaleString("pt-BR")}</td>`;
