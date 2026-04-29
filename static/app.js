@@ -526,7 +526,10 @@ async function loadCharts() {
             const resp = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
             if (!resp.ok) { console.error(url, resp.status, await resp.text()); return null; }
             const fig = await resp.json();
-            if (fig.data && divId) Plotly.newPlot(divId, fig.data, fig.layout, plotCfg);
+            if (fig.data && divId) {
+                await Plotly.newPlot(divId, fig.data, fig.layout, plotCfg);
+                requestAnimationFrame(() => Plotly.Plots.resize(divId));
+            }
             return fig;
         } catch(e) { console.error(url, e); return null; }
     }
@@ -541,7 +544,10 @@ async function loadCharts() {
 
     if (mtm && mtm.total_pnl !== undefined) {
         document.getElementById("pnlTotal").innerHTML =
-            `<div class="metric"><div class="label">P&L Total do Cenário</div><div class="value ${mtm.total_pnl>=0?"green":"red"}">R$ ${mtm.total_pnl>=0?"+":""}${mtm.total_pnl.toLocaleString("pt-BR",{maximumFractionDigits:0})}</div></div>`;
+            `<div class="pnl-hero">
+                <div class="pnl-hero-label">P&L Total do Cenário</div>
+                <div class="pnl-hero-value ${mtm.total_pnl>=0?"green":"red"}">R$ ${mtm.total_pnl>=0?"+":""}${mtm.total_pnl.toLocaleString("pt-BR",{maximumFractionDigits:0})}</div>
+            </div>`;
     }
     if (mtm && mtm.table) renderMtmTable(mtm.table, r.legs);
     if (mtm && mtm.flow_pnl) renderCashflows(r, mtm.flow_pnl);
@@ -725,4 +731,15 @@ document.addEventListener("DOMContentLoaded", () => {
     init();
     if (typeof katex !== "undefined") { renderFormulas(); }
     else { document.querySelector('script[src*="katex"]').addEventListener("load", renderFormulas); }
+});
+
+let _resizeTimer;
+window.addEventListener("resize", () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+        ["chartContainer","pnlBarsChart","pnlConsolidatedChart","pnlPerLegChart"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el._fullLayout) Plotly.Plots.resize(id);
+        });
+    }, 200);
 });

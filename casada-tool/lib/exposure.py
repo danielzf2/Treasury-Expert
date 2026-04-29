@@ -81,14 +81,14 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
                     spread = (t["tax_fin"] - d["taxa"]) * 100
                     bmk = "IPCA" if t["instrument"] == "NTN-B" else "CDI"
                     return {"type": "casada", "spread": spread, "bmk": bmk, "tpf": t, "di": d,
-                            "result": f"{bmk} {spread:+.2f} bps ({t['instrument']} {t['tax_fin']:.3f}% vs DI1 {d['taxa']:.3f}%)"}
+                            "result": f"{bmk} {spread:+.2f} bps"}
 
         for t in [l for l in tpfs if l["instrument"] == "NTN-B"]:
             for d in daps:
                 if t["parsed"]["label"] == d["parsed"]["label"] and t["direction"] == d["direction"]:
                     spread = (t["tax_fin"] - d["taxa"]) * 100
                     return {"type": "casada", "spread": spread, "bmk": "IPCA", "tpf": t, "di": d,
-                            "result": f"IPCA {spread:+.2f} bps (NTN-B {t['tax_fin']:.3f}% vs DAP {d['taxa']:.3f}%)"}
+                            "result": f"IPCA {spread:+.2f} bps"}
 
         for dol in dols:
             for d in dis:
@@ -123,16 +123,6 @@ def detect_strategy(legs: list[dict], spot: float = 4.9724) -> dict:
 
     pair = _find_pair(legs)
     if pair:
-        _used = {id(v) for v in [pair.get("tpf"), pair.get("di"), pair.get("dol"),
-                                  pair.get("frc"), pair.get("ddi")] if v is not None}
-        remaining = [l for l in legs if id(l) not in _used]
-        if remaining:
-            extras = []
-            for r in remaining:
-                info = INSTRUMENTS[r["instrument"]]
-                d = "C" if r["direction"] == "C" else "V"
-                extras.append(f"{d} {r['instrument']} {r['parsed']['label']}")
-            pair["result"] += " + " + ", ".join(extras)
         return pair
 
     descs = []
