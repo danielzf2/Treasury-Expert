@@ -96,6 +96,40 @@ SCENARIOS: dict[str, ScenarioDefinition] = {
 }
 
 
+# Vertices padronizados usados como ANCORAS para cenarios nao-paralelos.
+# Padrao Bacen/RiskMetrics e Mercado de Renda Fixa (capitulo 17): vertices
+# absolutos definem "curto" e "longo" em termos de mercado, NAO em termos
+# da carteira do usuario. Isso evita o bug de uma carteira concentrada num
+# unico vencimento (ex: NTN-F Jan/31 + DI1 Jan/31, ambos ~1170 DU) tratar
+# todos os cashflows curtos como se fossem 'curtos' relativos uns aos outros.
+#
+# Curto = 1 mes (21 DU). Longo = 10 anos (2520 DU). Mid = 5 anos (~1270 DU).
+# Para steepener/flattener, este eh o range em que a magnitude completa eh
+# aplicada nas pontas.
+SCENARIO_DU_SHORT = 21
+SCENARIO_DU_LONG = 2520
+
+# Cupom cambial (FRC, DDI) eh quotado em DC linear 360. Ancoras analogas:
+# 30 DC ~= 1 mes, 3600 DC ~= 10 anos.
+SCENARIO_DC_SHORT = 30
+SCENARIO_DC_LONG = 3600
+
+
+def calc_scenario_delta_fixed(du: int, scenario_key: str, magnitude: float,
+                               custom_parallel_bps: float = 0.0,
+                               custom_slope_bps: float = 0.0,
+                               custom_curvature_bps: float = 0.0) -> float:
+    """Versao do calc_scenario_delta com ancoras absolutas (1m a 10y).
+
+    Use esta funcao em PRODUCAO (charts, decomposition, MtM table). A funcao
+    `calc_scenario_delta` original, com du_min/du_max parametrizaveis, eh
+    mantida para testes oracle e usos legados.
+    """
+    return calc_scenario_delta(du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG,
+                                scenario_key, magnitude,
+                                custom_parallel_bps, custom_slope_bps, custom_curvature_bps)
+
+
 def calc_scenario_delta(du: int, du_min: int, du_max: int,
                          scenario_key: str, magnitude: float,
                          custom_parallel_bps: float = 0.0,

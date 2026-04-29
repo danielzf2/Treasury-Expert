@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from .instruments import INSTRUMENTS, _coupon_cashflows
 from .scenarios import (
     calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow, get_spot_curve_for_leg,
+    SCENARIO_DU_SHORT, SCENARIO_DU_LONG, SCENARIO_DC_SHORT, SCENARIO_DC_LONG,
 )
 from .curves import (
     flat_forward_curve, flat_forward_curve_lin360,
@@ -69,10 +70,15 @@ def _is_rate_leg(l: dict) -> bool:
 
 
 def _rate_du_range(legs: list[dict]) -> tuple[int, int]:
-    rate_legs = [l for l in legs if _is_rate_leg(l)]
-    if not rate_legs:
-        return 0, 0
-    return min(l["du"] for l in rate_legs), max(l["du"] for l in rate_legs)
+    """Range para calculo de cenarios: usa ancoras absolutas (1m a 10y).
+
+    Definicao baseada em vertices de mercado padronizados (Bacen/RiskMetrics)
+    em vez do range das pernas. Isso da semantica consistente para 'curtos' e
+    'longos' independentemente da composicao da carteira: cashflows curtos
+    (e.g., cupons proximos) e longos (vencimento) recebem choques diferenciados
+    mesmo quando todas as pernas estao em maturidades proximas.
+    """
+    return SCENARIO_DU_SHORT, SCENARIO_DU_LONG
 
 
 def _leg_delta(l: dict, du_min: int, du_max: int,
@@ -195,12 +201,30 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
     if rate_legs:
         du_min_legs = min(l["du"] for l in rate_legs)
         du_max_legs = max(l["du"] for l in rate_legs)
+        # Para titulos com cupom, considera tambem os DUs dos cashflows no range visivel
+        for l in rate_legs:
+            cf_dict = l.get("cashflows", {})
+            cashflows = cf_dict.get("flows") if isinstance(cf_dict, dict) else None
+            if cashflows:
+                for cf in cashflows:
+                    if cf.get("du"):
+                        du_max_legs = max(du_max_legs, cf["du"])
     else:
         du_min_legs, du_max_legs = 0, 1000
+
+    # Limita a visualizacao da curva ao range das pernas + 10% de buffer pra direita.
+    # Pontos da curva alem do ultimo vencimento da carteira nao sao relevantes para
+    # o cenario aplicado (o choque ja e clampeado em t=+1 ali).
+    du_view_max = int(du_max_legs * 1.10) + 30
 
     if di1_curve:
         try:
             smooth_dus, smooth_rates = _build_smooth_curve(di1_curve, du_step=5)
+            # Mantem so os pontos dentro do range visivel
+            if smooth_dus:
+                pairs = [(d, r) for d, r in zip(smooth_dus, smooth_rates) if d <= du_view_max]
+                smooth_dus = [p[0] for p in pairs]
+                smooth_rates = [p[1] for p in pairs]
 
             if smooth_dus:
                 fig.add_trace(go.Scatter(
@@ -212,7 +236,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
 
                 curve_deltas = [
                     calc_scenario_delta(
-                        du, du_min_legs, du_max_legs, scenario_key, magnitude,
+                        du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
                         custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                     )
                     for du in smooth_dus
@@ -242,6 +266,10 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
         try:
             dap_dus, dap_rates = _build_smooth_dap_curve(dap_curve, du_step=5)
             if dap_dus:
+                pairs = [(d, r) for d, r in zip(dap_dus, dap_rates) if d <= du_view_max]
+                dap_dus = [p[0] for p in pairs]
+                dap_rates = [p[1] for p in pairs]
+            if dap_dus:
                 fig.add_trace(go.Scatter(
                     x=dap_dus, y=dap_rates, mode="lines",
                     name="DAP Antes",
@@ -251,7 +279,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
 
                 dap_deltas = [
                     calc_scenario_delta(
-                        du, du_min_legs, du_max_legs, scenario_key, magnitude,
+                        du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
                         custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                     )
                     for du in dap_dus
@@ -282,7 +310,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
             auto_deltas = []
             for l in auto_rate_legs:
                 d_k = calc_scenario_delta(
-                    l["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                    l["du"], SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
                     custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                 )
                 auto_rates_a.append(l["tax_fin"] + d_k / 100)
@@ -313,7 +341,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
             info = l.get("info") or INSTRUMENTS.get(l.get("instrument"))
             is_coupon = info and info.cup_sem > 0
             delta = calc_scenario_delta(
-                l["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                l["du"], SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
                 custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
             )
             after = l["tax_fin"] + delta / 100
@@ -351,7 +379,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                         if cf["label"].startswith("Principal"):
                             continue
                         d_k = calc_scenario_delta(
-                            cf["du"], du_min_legs, du_max_legs, scenario_key, magnitude,
+                            cf["du"], SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
                             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
                         )
                         cf_dus.append(cf["du"])
@@ -381,7 +409,7 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                        label="Posicao")
     fig.update_layout(
         **_base_layout("Curva de Juros — Flat Forward", 450),
-        xaxis=dict(title="Prazo (DU)", gridcolor=_GRID, rangemode="tozero"),
+        xaxis=dict(title="Prazo (DU)", gridcolor=_GRID, range=[0, du_view_max]),
         yaxis=dict(title="Taxa (% a.a.)", tickformat=".2f", gridcolor=_GRID),
     )
     return fig
@@ -668,10 +696,6 @@ def chart_cupom_cambial(frc_contracts: list, delta_cupom_bps: float = 0.0,
     dcs_before = [p[0] for p in smooth]
     rates_before = [p[1] for p in smooth]
 
-    # Range de DC usado para normalizar o cenario
-    dc_min = min(dcs_before)
-    dc_max = max(dcs_before)
-
     fig.add_trace(go.Scatter(
         x=dcs_before, y=rates_before, mode="lines",
         name="Cupom Antes",
@@ -679,10 +703,10 @@ def chart_cupom_cambial(frc_contracts: list, delta_cupom_bps: float = 0.0,
         hovertemplate="DC: %{x}<br>Cupom: %{y:.3f}%<extra>Antes</extra>",
     ))
 
-    # Choque por dc (cenario + slider uniforme)
+    # Choque por dc (cenario + slider uniforme); ancoras absolutas em DC
     deltas_bps = [
         calc_scenario_delta(
-            dc, dc_min, dc_max, scenario_key, magnitude,
+            dc, SCENARIO_DC_SHORT, SCENARIO_DC_LONG, scenario_key, magnitude,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         ) + delta_cupom_bps
         for dc in dcs_before
@@ -784,22 +808,16 @@ def chart_dol_forward(di1_contracts: list, frc_contracts: list,
     ))
 
     spot_after = spot * (1 + delta_fx_pct / 100)
-    # Cenario aplicado por DU em DI; range normalizado pelos vertices DI
-    du_min = min(du for du, _ in di_verts)
-    du_max = max(du for du, _ in di_verts)
     di_verts_after = [
         (du, r + (calc_scenario_delta(
-            du, du_min, du_max, scenario_key, magnitude,
+            du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         ) + delta_pre_bps) / 100)
         for du, r in di_verts
     ]
-    # Cenario aplicado por DC em FRC; range normalizado pelos vertices FRC
-    dc_min = min(dc for dc, _ in frc_verts)
-    dc_max = max(dc for dc, _ in frc_verts)
     frc_verts_after = [
         (dc, r + (calc_scenario_delta(
-            dc, dc_min, dc_max, scenario_key, magnitude,
+            dc, SCENARIO_DC_SHORT, SCENARIO_DC_LONG, scenario_key, magnitude,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         ) + delta_cupom_bps) / 100)
         for dc, r in frc_verts
@@ -880,9 +898,6 @@ def chart_taxa_real(dap_contracts: list, delta_ipca_bps: float = 0.0,
     dus = [p[0] for p in smooth]
     rates_before = [p[1] for p in smooth]
 
-    du_min = min(dus)
-    du_max = max(dus)
-
     fig.add_trace(go.Scatter(
         x=dus, y=rates_before, mode="lines",
         name="DAP Antes",
@@ -892,7 +907,7 @@ def chart_taxa_real(dap_contracts: list, delta_ipca_bps: float = 0.0,
 
     deltas_bps = [
         calc_scenario_delta(
-            du, du_min, du_max, scenario_key, magnitude,
+            du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
             custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
         ) + delta_ipca_bps
         for du in dus

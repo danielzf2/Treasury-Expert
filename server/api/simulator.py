@@ -15,7 +15,10 @@ from lib.calendar import parse_ticker, du_entre, dc_entre, default_liq_date
 from lib.market_data import fetch_all, get_tpf_vctos, find_di1_rate_for_date, MarketSnapshot
 from lib.instruments import INSTRUMENTS, pu, duration, dv01, key_rate_duration, cupom_cambial_implicito
 from lib.exposure import get_exposure, detect_strategy, analyze_risk_factors, suggest_hedge
-from lib.scenarios import SCENARIOS, calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow
+from lib.scenarios import (
+    SCENARIOS, calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow,
+    get_spot_curve_for_leg, SCENARIO_DU_SHORT, SCENARIO_DU_LONG,
+)
 from lib.charts import (
     chart_curva_antes_depois, chart_pnl_barras,
     chart_pnl_consolidado, chart_pnl_por_perna,
@@ -939,9 +942,10 @@ def scenario_decomposition(req: DecompositionRequest):
     - pnl_convex_diff: pnl_real - pnl_linear (efeito 2a ordem)
     """
     legs = _rehydrate_legs(req.legs)
-    rate_legs = [l for l in legs if l.get("info") and l["info"].conv != "price"]
-    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
-    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+    # Ancoras absolutas (1m, 10y) — independente da composicao da carteira.
+    # Veja docstring de SCENARIO_DU_SHORT em lib/scenarios.py.
+    du_min = SCENARIO_DU_SHORT
+    du_max = SCENARIO_DU_LONG
 
     rows: list[dict] = []
     total_linear = 0.0
@@ -1017,7 +1021,31 @@ def scenario_decomposition(req: DecompositionRequest):
         else:
             sign = -1 if leg["direction"] == "C" else 1
 
-        pnl_real = sign * (pu_after - pu_before) * leg["quantity"]
+        # Para titulos com cupom (NTN-F, NTN-B): re-precifica fluxo-a-fluxo
+        # com choque por DU de cada cashflow (per-flow scenario).
+        # Isso captura corretamente shifts nao-paralelos (steepener, flattener, butterfly):
+        # cada cupom recebe o choque do seu proprio vertice na curva.
+        per_flow_used = False
+        if info.type == "tpf" and info.cup_sem > 0:
+            spot_curve = get_spot_curve_for_leg(leg, req.di1, req.dap, liq)
+            pf = calc_leg_pnl_per_flow(
+                leg, req.scenario_key, req.magnitude, du_min, du_max, spot_curve,
+                req.custom_parallel_bps, req.custom_slope_bps, req.custom_curvature_bps,
+                delta_ipca_bps=req.delta_ipca_bps if inst == "NTN-B" else 0.0,
+            )
+            if pf and pf.get("flows"):
+                # delta efetivo = media ponderada pelos PVs
+                tot_pv = sum(abs(f["old_pv"]) for f in pf["flows"]) or 1.0
+                delta_bps = sum(f["delta_bps"] * abs(f["old_pv"]) for f in pf["flows"]) / tot_pv
+                rate_after = tax_fin + delta_bps / 100.0
+                pu_before = pf["old_pu"]
+                pu_after = pf["new_pu"]
+                pnl_real = pf["leg_pnl"]
+                per_flow_used = True
+
+        if not per_flow_used:
+            pnl_real = sign * (pu_after - pu_before) * leg["quantity"]
+
         # Linear de 1a ordem: dPU ≈ -DV01_unit * delta_bps
         # → pnl ≈ sign * (-DV01_unit * delta_bps) * qty = -sign * DV01_total * delta_bps
         pnl_linear = -sign * leg["dv01_total"] * delta_bps
@@ -1184,9 +1212,9 @@ def mtm_table(req: MtmTableRequest):
 
     legs = _rehydrate_legs(req.legs)
 
-    rate_legs = [l for l in legs if l["info"] and l["info"].conv != "price"]
-    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
-    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+    # Ancoras absolutas (1m a 10y) — definicao consistente de curtos/longos.
+    du_min = SCENARIO_DU_SHORT
+    du_max = SCENARIO_DU_LONG
 
     spot_per_leg = [
         get_spot_curve_for_leg(l, req.di1, req.dap, l.get("liq")) for l in legs

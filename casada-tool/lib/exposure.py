@@ -140,6 +140,22 @@ def compute_net_exposure(legs: list[dict]) -> dict:
                 })
                 all_entries.append({**e, "side": side, "leg_label": label})
 
+    def _weighted_rate(entries: list[dict]) -> float | None:
+        """Media ponderada por DV01 das taxas (taxas em pct).
+
+        Quando ha multiplas pernas do mesmo fator (ex: strip de hedge com 10 DI1s),
+        a taxa efetiva do lado eh a media ponderada por DV01, NAO a soma.
+        """
+        rates = [(e["rate"], e["dv01"]) for e in entries if e["rate"] is not None]
+        if not rates:
+            return None
+        if len(rates) == 1:
+            return rates[0][0]
+        total_w = sum(w for _, w in rates)
+        if total_w > 0:
+            return sum(r * w for r, w in rates) / total_w
+        return sum(r for r, _ in rates) / len(rates)
+
     cancelled: list[dict] = []
     residual: list[dict] = []
 
@@ -148,11 +164,11 @@ def compute_net_exposure(legs: list[dict]) -> dict:
         has_passivo = len(sides["passivo"]) > 0
 
         if has_ativo and has_passivo:
-            ativo_rates = [e["rate"] for e in sides["ativo"] if e["rate"] is not None]
-            passivo_rates = [e["rate"] for e in sides["passivo"] if e["rate"] is not None]
+            ativo_rate_avg = _weighted_rate(sides["ativo"])
+            passivo_rate_avg = _weighted_rate(sides["passivo"])
 
-            if ativo_rates and passivo_rates:
-                spread = sum(ativo_rates) - sum(passivo_rates)
+            if ativo_rate_avg is not None and passivo_rate_avg is not None:
+                spread = ativo_rate_avg - passivo_rate_avg
             else:
                 spread = 0.0
 
@@ -175,8 +191,8 @@ def compute_net_exposure(legs: list[dict]) -> dict:
 
             cancelled.append({
                 "factor": factor,
-                "ativo_total": sum(ativo_rates) if ativo_rates else None,
-                "passivo_total": sum(passivo_rates) if passivo_rates else None,
+                "ativo_total": ativo_rate_avg,
+                "passivo_total": passivo_rate_avg,
                 "spread_pct": spread,
                 "spread_bps": round(spread * 100, 2) if spread else 0.0,
                 "ativo_legs": ativo_legs,
@@ -189,8 +205,7 @@ def compute_net_exposure(legs: list[dict]) -> dict:
         else:
             side = "ativo" if has_ativo else "passivo"
             entries = sides[side]
-            rates = [e["rate"] for e in entries if e["rate"] is not None]
-            rate_total = sum(rates) if rates else None
+            rate_total = _weighted_rate(entries)
             leg_labels = [e["leg_label"] for e in entries]
             direction = "recebe" if side == "ativo" else "paga"
             residual.append({

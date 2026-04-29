@@ -142,10 +142,11 @@ def test_mtm_table_per_leg_oracle(preset_name, scenario_key, magnitude,
 
     row = next(r for r in res["table"] if r["delta"] == magnitude)
 
-    # Calcula du_min/max (somente legs com taxa, nao DOL)
-    rate_legs = [l for l in legs if l["info"].conv != "price"]
-    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
-    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+    # mtm_table usa ancoras absolutas (1m, 10y) — definicao consistente de
+    # 'curtos vs longos' independente da carteira.
+    from lib.scenarios import SCENARIO_DU_SHORT, SCENARIO_DU_LONG
+    du_min = SCENARIO_DU_SHORT
+    du_max = SCENARIO_DU_LONG
 
     # Build spot curves
     from lib.curves import build_di_vertices, build_dap_vertices
@@ -195,9 +196,9 @@ def test_mtm_flow_pnl_total(preset_name, scenario_key, magnitude,
     flow_pnl = res["flow_pnl"]
     assert len(flow_pnl) >= 1  # pelo menos 1 perna com cupom
 
-    rate_legs = [l for l in legs if l["info"].conv != "price"]
-    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
-    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+    from lib.scenarios import SCENARIO_DU_SHORT, SCENARIO_DU_LONG
+    du_min = SCENARIO_DU_SHORT
+    du_max = SCENARIO_DU_LONG
 
     from lib.curves import build_di_vertices, build_dap_vertices
     di_verts = build_di_vertices(market_snap.di1, LIQ_DATE)
@@ -295,9 +296,9 @@ def test_mtm_table_custom_scenario(preset_name, custom_p, custom_s, custom_c,
     )
     res = mtm_table(req)
 
-    rate_legs = [l for l in legs if l["info"].conv != "price"]
-    du_min = min(l["du"] for l in rate_legs) if rate_legs else 0
-    du_max = max(l["du"] for l in rate_legs) if rate_legs else 1
+    from lib.scenarios import SCENARIO_DU_SHORT, SCENARIO_DU_LONG
+    du_min = SCENARIO_DU_SHORT
+    du_max = SCENARIO_DU_LONG
 
     for row in res["table"]:
         mag = row["delta"]
