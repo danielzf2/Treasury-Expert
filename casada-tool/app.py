@@ -651,6 +651,9 @@ with tab_sim:
         with col:
             if st.button(name, use_container_width=True, key=f"pr_{name}"):
                 st.session_state.legs = [p.copy() for p in PRESETS[name]]
+                for _ki in range(20):
+                    for _kp in ["inst_", "tick_", "dir_", "qty_", "tx_", "liq_", "ct_", "cv_", "rm_"]:
+                        st.session_state.pop(f"{_kp}{_ki}", None)
                 st.rerun()
 
     # ========== LEG INPUTS ==========
