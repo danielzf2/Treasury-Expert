@@ -205,6 +205,8 @@ def _serialize_hedge(hedge: dict | None) -> dict | None:
     for k, v in hedge.items():
         if k == "tpf" and isinstance(v, dict):
             out[k] = _serialize_leg_ref(v)
+        elif k == "strip" and isinstance(v, list):
+            out[k] = [_serialize(s) for s in v]
         else:
             out[k] = _serialize(v)
     return out

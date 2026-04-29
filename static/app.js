@@ -200,6 +200,7 @@ function renderResults() {
     renderDetails(r);
     renderSpreadCosts(r);
     renderCashflows(r);
+    renderHedge(r);
 }
 
 function renderMetrics(r) {
@@ -348,6 +349,66 @@ function renderCashflows(r, flowPnl=[]) {
             showlegend:false,
         }, {displayModeBar:false, responsive:true});
     });
+}
+
+function renderHedge(r) {
+    const el = document.getElementById("hedgeSection");
+    if (!el) return;
+    const h = r.hedge;
+    if (!h || !h.tpf) { el.innerHTML = ""; return; }
+
+    const inst = h.hedge_instrument || "DI1";
+    const tpfInst = h.tpf.instrument || "NTN-F";
+
+    let html = '<hr class="divider"><div class="sim-card">';
+    html += `<div class="sim-card-h">Hedge de ${tpfInst} com ${inst} — 3 Modalidades</div>`;
+
+    html += '<div class="metrics" style="margin-bottom:12px">';
+    html += `<div class="metric"><div class="label">DV01 Total ${tpfInst}</div><div class="value">R$ ${fmtNumber(h.tpf.dv01_total,0)}</div></div>`;
+    html += `<div class="metric"><div class="label">${inst} atual</div><div class="value">${h.current_n} contratos</div></div>`;
+    html += `<div class="metric"><div class="label">DV01 residual</div><div class="value">R$ ${fmtNumber(h.dv01_residual,0)}</div></div>`;
+    html += '</div>';
+
+    html += '<div style="overflow-x:auto"><table class="sim-tbl">';
+    html += `<tr><th>Modalidade</th><th class="tc">Vértice ${inst}</th><th class="tr">DV01/contrato</th><th class="tr">Contratos</th><th>Obs</th></tr>`;
+
+    html += `<tr><td class="bold">1. No Vencimento</td><td class="tc mono">${h.du_maturity} DU</td>`;
+    html += `<td class="tr mono">R$ ${fmtNumber(h.dv01_at_maturity,2)}</td>`;
+    html += `<td class="tr mono">${h.n_at_maturity}</td>`;
+    html += `<td class="muted" style="font-size:10px">Aproximação — descasa duration para títulos com cupom</td></tr>`;
+
+    html += `<tr><td class="bold">2. Na Duration</td><td class="tc mono">${h.du_duration} DU</td>`;
+    html += `<td class="tr mono">R$ ${fmtNumber(h.dv01_at_duration,2)}</td>`;
+    html += `<td class="tr mono">${h.n_at_duration}</td>`;
+    html += `<td class="muted" style="font-size:10px">Casamento de DV01 no prazo médio — funciona bem para shifts paralelos</td></tr>`;
+
+    html += `<tr class="av-result"><td class="bold">3. Strip (Hedge Perfeito)</td><td class="tc">ver abaixo</td>`;
+    html += `<td></td><td class="tr mono bold">${h.n_strip_total || 0}</td>`;
+    html += `<td class="muted" style="font-size:10px">1 ${inst} por fluxo — elimina risco de inclinação e curvatura</td></tr>`;
+    html += '</table></div>';
+
+    if (h.strip && h.strip.length) {
+        html += `<div style="margin-top:12px"><p style="font-size:12px;color:#8b949e;margin-bottom:4px">Detalhamento do Strip — ${inst} por fluxo de ${tpfInst}</p>`;
+        html += '<div style="overflow-x:auto"><table class="sim-tbl">';
+        html += `<tr><th>Fluxo</th><th>Data</th><th class="tc">DU</th><th class="tr">PV Fluxo</th><th class="tr">DV01 Fluxo</th><th class="tr">DV01/${inst}</th><th class="tr">Contratos ${inst}</th></tr>`;
+        let totalDv01 = 0, totalN = 0;
+        h.strip.forEach(s => {
+            totalDv01 += s.dv01_flow || 0;
+            totalN += s.hedge_n || 0;
+            html += `<tr><td>${s.label}</td><td class="mono">${s.payment_date || "--"}</td><td class="tc mono">${s.du}</td>`;
+            html += `<td class="tr mono">${fmtMoney(s.pv_flow_total,0)}</td>`;
+            html += `<td class="tr mono">${fmtNumber(s.dv01_flow,2)}</td>`;
+            html += `<td class="tr mono">${fmtNumber(s.hedge_dv01_unit,2)}</td>`;
+            html += `<td class="tr mono">${s.hedge_n}</td></tr>`;
+        });
+        html += `<tr class="av-result"><td class="bold">Total</td><td></td><td></td><td></td>`;
+        html += `<td class="tr mono bold">${fmtNumber(totalDv01,2)}</td><td></td>`;
+        html += `<td class="tr mono bold">${totalN}</td></tr>`;
+        html += '</table></div></div>';
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 function renderScenarios() {

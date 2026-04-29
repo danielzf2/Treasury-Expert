@@ -241,13 +241,20 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
 
 
 def suggest_hedge(legs: list[dict]):
-    """Sugere quantidade de DI1 para hedge de TPF com cupom.
+    """Sugere quantidade de DI1/DAP para hedge de TPF com cupom.
 
-    Calcula DV01 ideal na duration e no vencimento final.
+    Tres modalidades:
+    1. Vencimento: 1 contrato DI1/DAP no DU do vencimento final
+    2. Duration: 1 contrato DI1/DAP no DU da Macaulay duration
+    3. Strip (hedge perfeito): 1 contrato por fluxo, casando VP fluxo a fluxo
     """
+    from .instruments import key_rate_duration
+
     tpf = next((l for l in legs if INSTRUMENTS[l["instrument"]].cup_sem > 0), None)
     if not tpf:
         return None
+
+    hedge_inst = "DAP" if tpf["instrument"] == "NTN-B" else "DI1"
 
     di_rate = 13.65
     di_leg = next((l for l in legs if l["instrument"] in ("DI1", "DAP")), None)
@@ -257,16 +264,48 @@ def suggest_hedge(legs: list[dict]):
     du_dur = round(tpf["d_mac"] * 252)
     du_mat = tpf["du"]
 
-    dv01_at_dur = dv01("DI1", di_rate, du_dur, du_dur, 1)
-    dv01_at_mat = dv01("DI1", di_rate, du_mat, du_mat, 1)
+    dv01_at_dur = dv01(hedge_inst, di_rate, du_dur, du_dur, 1)
+    dv01_at_mat = dv01(hedge_inst, di_rate, du_mat, du_mat, 1)
 
     n_at_dur = round(tpf["dv01_total"] / dv01_at_dur.unit) if dv01_at_dur.unit else 0
     n_at_mat = round(tpf["dv01_total"] / dv01_at_mat.unit) if dv01_at_mat.unit else 0
     current_n = di_leg["quantity"] if di_leg else 0
     resid = tpf["dv01_total"] - (di_leg["dv01_total"] if di_leg else 0)
 
+    strip_legs = []
+    flows = key_rate_duration(
+        tpf["instrument"], tpf["taxa"], tpf["du"],
+        tpf.get("liq"), tpf.get("parsed", {}).get("date"),
+    )
+    tpf_vna = tpf.get("vna")
+    vna_scale = (tpf_vna / 100) if (tpf["instrument"] == "NTN-B" and tpf_vna and tpf_vna > 0) else 1.0
+
+    for f in flows:
+        pv_scaled = f.pv * vna_scale
+        flow_dmod = f.t_anos / (1 + tpf["taxa"] / 100)
+        flow_dv01 = flow_dmod * pv_scaled * 0.0001
+        flow_dv01_total = flow_dv01 * tpf["quantity"]
+
+        di_dv01_1 = dv01(hedge_inst, di_rate, f.du, f.du, 1)
+        n_strip = round(flow_dv01_total / di_dv01_1.unit) if di_dv01_1.unit else 0
+
+        strip_legs.append({
+            "label": f.label,
+            "payment_date": f.payment_date,
+            "du": f.du,
+            "t_anos": f.t_anos,
+            "pv_flow": pv_scaled,
+            "pv_flow_total": pv_scaled * tpf["quantity"],
+            "dv01_flow": flow_dv01_total,
+            "hedge_instrument": hedge_inst,
+            "hedge_du": f.du,
+            "hedge_dv01_unit": di_dv01_1.unit,
+            "hedge_n": n_strip,
+        })
+
     return {
         "tpf": tpf,
+        "hedge_instrument": hedge_inst,
         "di_rate": di_rate,
         "du_duration": du_dur,
         "du_maturity": du_mat,
@@ -276,4 +315,6 @@ def suggest_hedge(legs: list[dict]):
         "dv01_at_maturity": dv01_at_mat.unit,
         "current_n": current_n,
         "dv01_residual": resid,
+        "strip": strip_legs,
+        "n_strip_total": sum(s["hedge_n"] for s in strip_legs),
     }
