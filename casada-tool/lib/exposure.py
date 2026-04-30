@@ -600,6 +600,79 @@ def _curve_label_for_tpf(tpf_inst: str) -> str:
     return "real (IPCA)" if tpf_inst == "NTN-B" else "pre"
 
 
+def _enrich_factor(factor: dict, *, exposicao_brl: float | None = None,
+                   exposicao_bps: float | None = None,
+                   n_contratos_zero: int | None = None,
+                   instrumento_zero: str | None = None,
+                   acao: str | None = None) -> dict:
+    """Adiciona campos quantitativos ao fator de risco.
+
+    - exposicao_brl: R$ DV01 da exposicao nao-hedgeada (None se N/A)
+    - exposicao_bps: bps de spread (None se N/A)
+    - n_contratos_zero: qtd do instrumento para zerar (None se N/A)
+    - instrumento_zero: ex 'DI1 F32' (None se N/A)
+    - acao: texto curto descrevendo como zerar
+    """
+    factor["exposicao_brl"] = exposicao_brl
+    factor["exposicao_bps"] = exposicao_bps
+    factor["n_contratos_zero"] = n_contratos_zero
+    factor["instrumento_zero"] = instrumento_zero
+    factor["acao"] = acao
+    return factor
+
+
+def _hedge_inst_for_factor(factor_name: str, has_ipca: bool) -> str:
+    """Mapeia nome do fator para instrumento de hedge canonico."""
+    name = factor_name.lower()
+    if "pre" in name or "cdi" in name or "selic" in name:
+        return "DI1"
+    if "ipca" in name or "real" in name:
+        return "DAP" if has_ipca else "NTN-B"
+    if "cup" in name:
+        return "FRC"
+    if "usd" in name or "dol" in name or "fx" in name:
+        return "DOL"
+    return "DI1"
+
+
+def _dv01_per_contract_at(hedge_inst: str, du_ref: int, taxa_ref: float = 13.65) -> float:
+    """DV01 por contrato unitario do hedge_inst no DU/taxa de referencia."""
+    if du_ref <= 0:
+        return 0.0
+    try:
+        return dv01(hedge_inst, taxa_ref, du_ref, du_ref, 1).unit
+    except Exception:
+        return 0.0
+
+
+def _n_to_zero(exposicao_brl: float, hedge_inst: str, du_ref: int,
+               taxa_ref: float = 13.65) -> int | None:
+    """Numero de contratos do hedge_inst para neutralizar a exposicao em DV01."""
+    if not exposicao_brl or exposicao_brl <= 0:
+        return None
+    dv01_unit = _dv01_per_contract_at(hedge_inst, du_ref, taxa_ref)
+    if dv01_unit <= 0:
+        return None
+    import math
+    return max(1, math.ceil(exposicao_brl / dv01_unit))
+
+
+def _ref_du_taxa(legs: list[dict], hedge_inst: str) -> tuple[int, float]:
+    """Tenta achar DU e taxa de referencia para o hedge_inst.
+
+    Prefere uma perna ja existente do hedge_inst; senao, usa DU medio das pernas
+    com taxa e taxa default 13.65%.
+    """
+    same_inst = next((l for l in legs if l["instrument"] == hedge_inst), None)
+    if same_inst:
+        return same_inst.get("du", 252), same_inst.get("taxa", 13.65)
+    rate_legs = [l for l in legs if INSTRUMENTS.get(l["instrument"]) and INSTRUMENTS[l["instrument"]].conv != "price"]
+    if rate_legs:
+        avg_du = round(sum(l["du"] for l in rate_legs) / len(rate_legs))
+        return avg_du, 13.65
+    return 252, 13.65
+
+
 def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
     """Analisa fatores de risco em duas camadas:
 
@@ -610,6 +683,9 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
 
     Excecao: hedge mode (strip/duration/maturity) tem logica propria
     porque a analise depende do modo de hedge, nao so das exposicoes.
+
+    Cada fator vem com campos quantitativos (exposicao_brl, exposicao_bps,
+    n_contratos_zero, instrumento_zero, acao) — preenchidos quando aplicavel.
     """
     factors = []
     insts = {l["instrument"] for l in legs}
@@ -632,42 +708,80 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
         tpf_name = coupon_tpf_with_hedge["instrument"]
         hedge_inst = _hedge_instrument_for_tpf(tpf_name)
         curve_lbl = _curve_label_for_tpf(tpf_name)
+        # Aproximacao da exposicao residual quando hedge nao e strip.
+        # Para duration: ~5% do DV01 do TPF (quanto a curva pode torcer 1bp na barriga
+        # vs ponta gera de mismatch). Para maturity: ~15% (mais exposto).
+        tpf_dv01 = abs(coupon_tpf_with_hedge.get("dv01_total", 0))
         if mode == "strip":
-            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Strip hedge: 1 {hedge_inst} por fluxo do {tpf_name} casa DV01 fluxo a fluxo na curva {curve_lbl}"})
-            factors.append({"fator": "Inclinacao (steepening)", "exposto": False,
-                            "desc": f"Cada cupom tem seu proprio {hedge_inst} no mesmo DU — neutraliza torcoes da curva {curve_lbl}"})
-            factors.append({"fator": "Curvatura (butterfly)", "exposto": False,
-                            "desc": f"Strip casa key-rates em todos os vertices do {tpf_name} — convexidade hedgeada"})
-            factors.append({"fator": "Convexidade (gamma)", "exposto": False,
-                            "desc": f"Convexidade replicada fluxo a fluxo via strip de {hedge_inst}"})
+            factors.append(_enrich_factor(
+                {"fator": "Nivel (shift paralelo)", "exposto": False,
+                 "desc": f"Strip hedge: 1 {hedge_inst} por fluxo do {tpf_name} casa DV01 fluxo a fluxo na curva {curve_lbl}"},
+                exposicao_brl=0.0, acao="Hedge perfeito - nada a fazer"))
+            factors.append(_enrich_factor(
+                {"fator": "Inclinacao (steepening)", "exposto": False,
+                 "desc": f"Cada cupom tem seu proprio {hedge_inst} no mesmo DU — neutraliza torcoes da curva {curve_lbl}"},
+                exposicao_brl=0.0, acao="Strip ja neutraliza torcoes"))
+            factors.append(_enrich_factor(
+                {"fator": "Curvatura (butterfly)", "exposto": False,
+                 "desc": f"Strip casa key-rates em todos os vertices do {tpf_name} — convexidade hedgeada"},
+                exposicao_brl=0.0, acao="Strip ja neutraliza curvatura"))
+            factors.append(_enrich_factor(
+                {"fator": "Convexidade (gamma)", "exposto": False,
+                 "desc": f"Convexidade replicada fluxo a fluxo via strip de {hedge_inst}"},
+                exposicao_brl=0.0, acao="Strip replica convexidade fluxo a fluxo"))
             if has_ntnb:
-                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "Strip de DAP fixa o cupom de IPCA em cada vertice — IPCA neutralizado"})
+                factors.append(_enrich_factor(
+                    {"fator": "Inflacao (IPCA)", "exposto": False,
+                     "desc": "Strip de DAP fixa o cupom de IPCA em cada vertice — IPCA neutralizado"},
+                    exposicao_brl=0.0, acao="Strip DAP ja neutraliza IPCA"))
         elif mode == "duration":
-            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Duration hedge: 1 {hedge_inst} no D.Mac do {tpf_name} casa DV01 total no shift paralelo"})
-            factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
-                            "desc": f"{hedge_inst} cobre 1 unico vertice (D.Mac); cupons do {tpf_name} ficam em outros vertices da curva {curve_lbl}"})
-            factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
-                            "desc": f"Sem casamento de key-rates em {tpf_name} vs {hedge_inst} (1 vertice) → twist nao-paralelo gera P&L"})
-            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
-                            "desc": f"{hedge_inst} (zero-coupon) tem convexidade diferente do {tpf_name} (cupons)"})
+            slope_exp = round(tpf_dv01 * 0.05, 2)  # ~5% via residual de torcao
+            curv_exp = round(tpf_dv01 * 0.03, 2)
+            factors.append(_enrich_factor(
+                {"fator": "Nivel (shift paralelo)", "exposto": False,
+                 "desc": f"Duration hedge: 1 {hedge_inst} no D.Mac do {tpf_name} casa DV01 total no shift paralelo"},
+                exposicao_brl=0.0, acao="DV01 casa em shift paralelo"))
+            factors.append(_enrich_factor(
+                {"fator": "Inclinacao (steepening)", "exposto": True,
+                 "desc": f"{hedge_inst} cobre 1 unico vertice (D.Mac); cupons do {tpf_name} ficam em outros vertices da curva {curve_lbl}"},
+                exposicao_brl=slope_exp, acao=f"Trocar para Strip ({hedge_inst} por fluxo) elimina torcoes"))
+            factors.append(_enrich_factor(
+                {"fator": "Curvatura (butterfly)", "exposto": True,
+                 "desc": f"Sem casamento de key-rates em {tpf_name} vs {hedge_inst} (1 vertice) — twist nao-paralelo gera P&L"},
+                exposicao_brl=curv_exp, acao=f"Trocar para Strip casa key-rates em todos os vertices"))
+            factors.append(_enrich_factor(
+                {"fator": "Convexidade (gamma)", "exposto": True,
+                 "desc": f"{hedge_inst} (zero-coupon) tem convexidade diferente do {tpf_name} (cupons)"},
+                exposicao_brl=curv_exp, acao="Strip replica convexidade do TPF"))
             if has_ntnb:
-                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "DAP no D.Mac hedgeia IPCA em 1a ordem (residual: spread IPCA por torcao)"})
+                factors.append(_enrich_factor(
+                    {"fator": "Inflacao (IPCA)", "exposto": False,
+                     "desc": "DAP no D.Mac hedgeia IPCA em 1a ordem (residual: spread IPCA por torcao)"},
+                    exposicao_brl=0.0, acao="OK em 1a ordem"))
         elif mode == "maturity":
-            factors.append({"fator": "Nivel (shift paralelo)", "exposto": False,
-                            "desc": f"Vcto hedge: 1 {hedge_inst} no DU final do {tpf_name} (mismatch de DV01 leve por D.Mac < DU final)"})
-            factors.append({"fator": "Inclinacao (steepening)", "exposto": True,
-                            "desc": f"Hedge so na ponta longa; cupons intermediarios do {tpf_name} expostos a curto da curva {curve_lbl}"})
-            factors.append({"fator": "Curvatura (butterfly)", "exposto": True,
-                            "desc": f"Cupons em vertices intermediarios sem hedge — sensivel a movimento da barriga da curva {curve_lbl}"})
-            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
-                            "desc": f"D.Mac do {tpf_name} < DU final → {hedge_inst} no vencimento gera dollar-duration excessivo no longo"})
+            slope_exp = round(tpf_dv01 * 0.15, 2)  # ~15% mais exposto a torcoes
+            curv_exp = round(tpf_dv01 * 0.10, 2)
+            factors.append(_enrich_factor(
+                {"fator": "Nivel (shift paralelo)", "exposto": False,
+                 "desc": f"Vcto hedge: 1 {hedge_inst} no DU final do {tpf_name} (mismatch de DV01 leve por D.Mac < DU final)"},
+                exposicao_brl=0.0, acao="DV01 casa aproximadamente em shift paralelo"))
+            factors.append(_enrich_factor(
+                {"fator": "Inclinacao (steepening)", "exposto": True,
+                 "desc": f"Hedge so na ponta longa; cupons intermediarios do {tpf_name} expostos a curto da curva {curve_lbl}"},
+                exposicao_brl=slope_exp, acao=f"Trocar para Duration ou Strip ({hedge_inst})"))
+            factors.append(_enrich_factor(
+                {"fator": "Curvatura (butterfly)", "exposto": True,
+                 "desc": f"Cupons em vertices intermediarios sem hedge — sensivel a movimento da barriga da curva {curve_lbl}"},
+                exposicao_brl=curv_exp, acao="Trocar para Strip"))
+            factors.append(_enrich_factor(
+                {"fator": "Convexidade (gamma)", "exposto": True,
+                 "desc": f"D.Mac do {tpf_name} < DU final — {hedge_inst} no vencimento gera dollar-duration excessivo no longo"},
+                exposicao_brl=curv_exp, acao="Trocar para Strip"))
             if has_ntnb:
-                factors.append({"fator": "Inflacao (IPCA)", "exposto": False,
-                                "desc": "DAP no vencimento hedgeia IPCA com mismatch (residual concentrado nos cupons curtos)"})
+                factors.append(_enrich_factor(
+                    {"fator": "Inflacao (IPCA)", "exposto": False,
+                     "desc": "DAP no vencimento hedgeia IPCA com mismatch (residual concentrado nos cupons curtos)"},
+                    exposicao_brl=0.0, acao="OK em 1a ordem"))
 
     # === CAMADA 1: MOTOR — fatores derivados de net_exposure (SEMPRE roda) ===
     net = strategy.get("net_exposure")
@@ -676,50 +790,101 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             quality = c.get("hedge_quality", "total")
             ratio = c.get("hedge_ratio", 1.0)
             ratio_pct = round(ratio * 100)
+            dv01_a = c.get("dv01_ativo", 0)
+            dv01_p = c.get("dv01_passivo", 0)
+            mismatch = round(abs(dv01_a - dv01_p), 2)
+            hedge_inst = _hedge_inst_for_factor(c["factor"], has_ntnb)
+            du_ref, taxa_ref = _ref_du_taxa(legs, hedge_inst)
+            n_zero = _n_to_zero(mismatch, hedge_inst, du_ref, taxa_ref)
+            inst_label = f"{hedge_inst} (~{round(du_ref/252,1)}a)"
 
             if quality == "insignificante":
-                # Hedge < 20% DV01: tratar como exposto
-                factors.append({"fator": c["factor"], "exposto": True,
-                                "desc": f"{c['factor']} presente em ambos lados mas hedge insignificante (DV01 cobertura {ratio_pct}%)"})
+                factors.append(_enrich_factor(
+                    {"fator": c["factor"], "exposto": True,
+                     "desc": f"{c['factor']} presente em ambos lados mas hedge insignificante (DV01 cobertura {ratio_pct}%)"},
+                    exposicao_brl=mismatch, n_contratos_zero=n_zero, instrumento_zero=inst_label,
+                    acao=f"Aumentar perna menor — adicionar {n_zero or '?'} {hedge_inst} para casar DV01"))
             elif quality == "parcial":
-                # 20-80%: exposto parcialmente
                 spread_str = f", spread {c['spread_bps']:+.0f} bps" if c["spread_bps"] else ""
-                factors.append({"fator": f"{c['factor']} (parcial)", "exposto": True,
-                                "desc": f"{c['factor']} parcialmente hedgeado (DV01 cobertura {ratio_pct}%{spread_str}) — residual significativo"})
+                factors.append(_enrich_factor(
+                    {"fator": f"{c['factor']} (parcial)", "exposto": True,
+                     "desc": f"{c['factor']} parcialmente hedgeado (DV01 cobertura {ratio_pct}%{spread_str}) — residual significativo"},
+                    exposicao_brl=mismatch,
+                    exposicao_bps=c["spread_bps"] if c["spread_bps"] else None,
+                    n_contratos_zero=n_zero, instrumento_zero=inst_label,
+                    acao=f"Adicionar {n_zero or '?'} {hedge_inst} na perna menor para zerar mismatch DV01"))
             else:
                 # >= 80%: hedge efetivo
                 if c["spread_bps"]:
-                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
-                                    "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps, DV01 {ratio_pct}%)"})
+                    factors.append(_enrich_factor(
+                        {"fator": f"{c['factor']} (cancela)", "exposto": False,
+                         "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps, DV01 {ratio_pct}%)"},
+                        exposicao_brl=mismatch, exposicao_bps=c["spread_bps"],
+                        acao=f"Hedge efetivo (DV01 {ratio_pct}% coberto). Spread {c['spread_bps']:+.0f} bps fixo travado"))
                 else:
-                    factors.append({"fator": f"{c['factor']} (cancela)", "exposto": False,
-                                    "desc": f"{c['factor']} cancela entre pernas (DV01 {ratio_pct}%)"})
+                    factors.append(_enrich_factor(
+                        {"fator": f"{c['factor']} (cancela)", "exposto": False,
+                         "desc": f"{c['factor']} cancela entre pernas (DV01 {ratio_pct}%)"},
+                        exposicao_brl=mismatch,
+                        acao=f"Hedge efetivo (DV01 {ratio_pct}% coberto)"))
         for r in net["residual"]:
             rate_str = f" {r['rate_total']:.2f}%" if r["rate_total"] is not None else ""
-            factors.append({"fator": r["factor"], "exposto": True,
-                            "desc": f"{r['direction'].capitalize()} {r['factor']}{rate_str} ({', '.join(r['legs'])})"})
+            # DV01 residual: soma DV01 dos entries da bag para esse fator/lado
+            bag_for_factor = net.get("bags", {}).get(r["factor"], {}).get(r["side"], [])
+            res_dv01 = round(sum(e.get("dv01", 0) for e in bag_for_factor), 2)
+            hedge_inst = _hedge_inst_for_factor(r["factor"], has_ntnb)
+            du_ref, taxa_ref = _ref_du_taxa(legs, hedge_inst)
+            n_zero = _n_to_zero(res_dv01, hedge_inst, du_ref, taxa_ref)
+            inst_label = f"{hedge_inst} (~{round(du_ref/252,1)}a)"
+            # Direcao oposta para hedge: se ativo, vendemos hedge_inst ou compramos perna passiva
+            if r["direction"] == "recebe":
+                hedge_action = f"Vender {n_zero or '?'} {hedge_inst} para zerar DV01 (perna passiva)"
+            else:
+                hedge_action = f"Comprar {n_zero or '?'} {hedge_inst} para zerar DV01 (perna ativa)"
+            factors.append(_enrich_factor(
+                {"fator": r["factor"], "exposto": True,
+                 "desc": f"{r['direction'].capitalize()} {r['factor']}{rate_str} ({', '.join(r['legs'])})"},
+                exposicao_brl=res_dv01, n_contratos_zero=n_zero, instrumento_zero=inst_label,
+                acao=hedge_action))
 
     # === CAMADA 2: ESTRUTURAL — detalhes de inclinacao, curvatura, convexidade ===
 
     # FRA de cupom IPCA / Direcional inclinacao (2 DAPs opostos)
     if strategy.get("type") == "fra_real":
-        factors.append({"fator": "Inclinacao Cupom IPCA", "exposto": True,
-                        "desc": "Trade direcional na inclinacao da curva real entre os 2 vencimentos do DAP — P&L se a forma da curva IPCA mudar"})
+        # Soma DV01 das DAPs envolvidas como proxy da exposicao a torcao
+        dap_dv01_total = sum(abs(l.get("dv01_total", 0)) for l in legs if l["instrument"] == "DAP")
+        factors.append(_enrich_factor(
+            {"fator": "Inclinacao Cupom IPCA", "exposto": True,
+             "desc": "Trade direcional na inclinacao da curva real entre os 2 vencimentos do DAP — P&L se a forma da curva IPCA mudar"},
+            exposicao_brl=round(dap_dv01_total * 0.30, 2),
+            acao="Posicao direcional intencional. Para zerar: fechar uma das pontas DAP"))
 
-    # Fatores derivados de sinteticas (Fix #5)
+    # Fatores derivados de sinteticas
     if strategy.get("type") == "cupom_sint":
-        factors.append({"fator": "Cupom Cambial Sintetico", "exposto": True,
-                        "desc": "DOL + DI1 (mesma direcao) cria cupom cambial sintetico via paridade coberta — sensivel ao FRC implicito"})
+        di_dv01 = sum(abs(l.get("dv01_total", 0)) for l in legs if l["instrument"] == "DI1")
+        factors.append(_enrich_factor(
+            {"fator": "Cupom Cambial Sintetico", "exposto": True,
+             "desc": "DOL + DI1 (mesma direcao) cria cupom cambial sintetico via paridade coberta — sensivel ao FRC implicito"},
+            exposicao_brl=round(di_dv01, 2),
+            acao="Posicao intencional. Para neutralizar: adicionar perna FRC oposta"))
     if strategy.get("type") in ("dol_sint", "dol_sint_ddi"):
-        factors.append({"fator": "Dolar Forward Sintetico", "exposto": True,
-                        "desc": "DI1 + FRC/DDI (opostos) replica dolar forward — P&L direcional ao spot USD/BRL via paridade coberta"})
+        factors.append(_enrich_factor(
+            {"fator": "Dolar Forward Sintetico", "exposto": True,
+             "desc": "DI1 + FRC/DDI (opostos) replica dolar forward — P&L direcional ao spot USD/BRL via paridade coberta"},
+            acao="Posicao intencional. Para zerar exposicao USD: adicionar DOL oposto"))
 
     # Spread basis (quando tem par de instrumentos com spread travado)
     spread = strategy.get("spread")
     if spread is not None:
         bmk = strategy.get("bmk", "CDI")
-        factors.append({"fator": "Spread (basis)", "exposto": True,
-                        "desc": f"Posicao trava a operacao em {bmk} {spread:+.2f} bps — abertura/fechamento do spread move o P&L direto"})
+        # P&L em R$ por 1 bp de movimento do spread = DV01 do TPF do par
+        tpf_in_strat = strategy.get("tpf")
+        spread_dv01 = abs(tpf_in_strat.get("dv01_total", 0)) if tpf_in_strat else 0
+        factors.append(_enrich_factor(
+            {"fator": "Spread (basis)", "exposto": True,
+             "desc": f"Posicao trava a operacao em {bmk} {spread:+.2f} bps — abertura/fechamento do spread move o P&L direto"},
+            exposicao_brl=round(spread_dv01, 2), exposicao_bps=round(spread, 2),
+            acao=f"Carrego: aguardar fechamento do spread no vencimento ou desmontar par antes"))
 
     # Inclinacao / Curvatura (titulos com cupom vs derivativo zero-coupon)
     # Pula se hedge mode ja tratou (evita duplicidade)
@@ -730,19 +895,39 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             tpf_inst = tpf_leg["instrument"]
             hedge_inst = _hedge_instrument_for_tpf(tpf_inst)
             curve_lbl = _curve_label_for_tpf(tpf_inst)
+            tpf_dv01 = abs(tpf_leg.get("dv01_total", 0))
             has_matching_deriv = any(d["instrument"] == hedge_inst for d in deriv_legs)
+            # Quando ja tem deriv contraparte: exposicao residual ~10-15% (slope/curv/convex)
+            # Quando NAO tem deriv: exposicao = full DV01 do TPF
+            slope_exp = round(tpf_dv01 * (0.12 if has_matching_deriv else 1.0), 2)
+            curv_exp = round(tpf_dv01 * (0.08 if has_matching_deriv else 1.0), 2)
             if has_matching_deriv:
-                factors.append({"fator": f"Inclinacao ({tpf_inst})", "exposto": True,
-                                "desc": f"{tpf_inst} tem cupons em multiplos vertices da curva {curve_lbl}; {hedge_inst} cobre apenas 1 vertice"})
-                factors.append({"fator": f"Curvatura ({tpf_inst})", "exposto": True,
-                                "desc": f"{tpf_inst} (com cupons) vs {hedge_inst} (zero-coupon) — convexidades diferentes deixam barriga exposta"})
+                factors.append(_enrich_factor(
+                    {"fator": f"Inclinacao ({tpf_inst})", "exposto": True,
+                     "desc": f"{tpf_inst} tem cupons em multiplos vertices da curva {curve_lbl}; {hedge_inst} cobre apenas 1 vertice"},
+                    exposicao_brl=slope_exp,
+                    acao=f"Mudar hedge_mode da perna {tpf_inst} para Strip (1 {hedge_inst} por fluxo)"))
+                factors.append(_enrich_factor(
+                    {"fator": f"Curvatura ({tpf_inst})", "exposto": True,
+                     "desc": f"{tpf_inst} (com cupons) vs {hedge_inst} (zero-coupon) — convexidades diferentes deixam barriga exposta"},
+                    exposicao_brl=curv_exp,
+                    acao=f"Strip casa key-rates em todos os vertices"))
             else:
-                factors.append({"fator": f"Inclinacao ({tpf_inst})", "exposto": True,
-                                "desc": f"{tpf_inst} tem cupons em multiplos vertices — exposto a torcoes da curva {curve_lbl}"})
-                factors.append({"fator": f"Curvatura ({tpf_inst})", "exposto": True,
-                                "desc": f"Fluxos intermediarios do {tpf_inst} amplificam sensibilidade a movimentos de barriga da curva {curve_lbl}"})
-                factors.append({"fator": f"Convexidade ({tpf_inst})", "exposto": True,
-                                "desc": f"{tpf_inst} com cupom tem convexidade diferente de zero-coupon — P&L nao-linear em movimentos grandes"})
+                factors.append(_enrich_factor(
+                    {"fator": f"Inclinacao ({tpf_inst})", "exposto": True,
+                     "desc": f"{tpf_inst} tem cupons em multiplos vertices — exposto a torcoes da curva {curve_lbl}"},
+                    exposicao_brl=slope_exp,
+                    acao=f"Adicionar perna {hedge_inst} (Strip) para hedge"))
+                factors.append(_enrich_factor(
+                    {"fator": f"Curvatura ({tpf_inst})", "exposto": True,
+                     "desc": f"Fluxos intermediarios do {tpf_inst} amplificam sensibilidade a movimentos de barriga da curva {curve_lbl}"},
+                    exposicao_brl=curv_exp,
+                    acao=f"Adicionar Strip de {hedge_inst}"))
+                factors.append(_enrich_factor(
+                    {"fator": f"Convexidade ({tpf_inst})", "exposto": True,
+                     "desc": f"{tpf_inst} com cupom tem convexidade diferente de zero-coupon — P&L nao-linear em movimentos grandes"},
+                    exposicao_brl=curv_exp,
+                    acao=f"Adicionar Strip"))
 
     # Convexidade (gamma) — quando TPF com cupom + derivativo, mostra D.Mac diff
     if has_cupom_tpf and (has_di or has_dap) and not coupon_tpf_with_hedge:
@@ -750,9 +935,13 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
         deriv_leg = next((l for l in legs if l["instrument"] in ("DI1", "DAP")), None)
         if tpf_leg and deriv_leg:
             diff = abs(tpf_leg["d_mac"] - deriv_leg["d_mac"])
-            # Convexidade sempre exposta quando cupom vs zero-coupon (diff > 0 implica mismatch)
-            factors.append({"fator": "Convexidade (gamma)", "exposto": True,
-                            "desc": f"D.Mac {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a) — titulo com cupom vs zero-coupon sempre tem convexidade descasada"})
+            tpf_dv01 = abs(tpf_leg.get("dv01_total", 0))
+            convex_exp = round(tpf_dv01 * 0.05 * diff, 2)  # proxy via D.Mac diff
+            factors.append(_enrich_factor(
+                {"fator": "Convexidade (gamma)", "exposto": True,
+                 "desc": f"D.Mac {tpf_leg['instrument']}={tpf_leg['d_mac']:.2f}a vs {deriv_leg['instrument']}={deriv_leg['d_mac']:.2f}a (diff {diff:.2f}a) — titulo com cupom vs zero-coupon sempre tem convexidade descasada"},
+                exposicao_brl=convex_exp,
+                acao="Strip elimina mismatch de convexidade"))
 
     return factors
 
@@ -786,8 +975,14 @@ def suggest_hedge(legs: list[dict]):
 
     n_at_dur = round(tpf["dv01_total"] / dv01_at_dur.unit) if dv01_at_dur.unit else 0
     n_at_mat = round(tpf["dv01_total"] / dv01_at_mat.unit) if dv01_at_mat.unit else 0
-    current_n = di_leg["quantity"] if di_leg else 0
-    resid = tpf["dv01_total"] - (di_leg["dv01_total"] if di_leg else 0)
+
+    # Status atual da carteira: soma TODAS as pernas DI1/DAP (manuais + AUTO).
+    # Antes pegava so a 1a perna, dando current_n=1 errado quando havia strip
+    # (10 pernas AUTO de qty=1 cada).
+    hedge_legs = [l for l in legs if l["instrument"] == hedge_inst]
+    current_n = sum(l.get("quantity", 0) for l in hedge_legs)
+    hedge_dv01_total = sum(l.get("dv01_total", 0) for l in hedge_legs)
+    resid = tpf["dv01_total"] - hedge_dv01_total
 
     strip_legs = []
     flows = key_rate_duration(
@@ -820,6 +1015,14 @@ def suggest_hedge(legs: list[dict]):
             "hedge_n": n_strip,
         })
 
+    # Residual DV01 apos adotar cada modalidade (substituindo a posicao atual)
+    residual_at_maturity = round(tpf["dv01_total"] - n_at_mat * dv01_at_mat.unit, 2)
+    residual_at_duration = round(tpf["dv01_total"] - n_at_dur * dv01_at_dur.unit, 2)
+    residual_at_strip = round(
+        tpf["dv01_total"] - sum(s["hedge_n"] * s["hedge_dv01_unit"] for s in strip_legs),
+        2,
+    )
+
     return {
         "tpf": tpf,
         "hedge_instrument": hedge_inst,
@@ -832,6 +1035,9 @@ def suggest_hedge(legs: list[dict]):
         "dv01_at_maturity": dv01_at_mat.unit,
         "current_n": current_n,
         "dv01_residual": resid,
+        "residual_at_maturity": residual_at_maturity,
+        "residual_at_duration": residual_at_duration,
+        "residual_at_strip": residual_at_strip,
         "strip": strip_legs,
         "n_strip_total": sum(s["hedge_n"] for s in strip_legs),
     }

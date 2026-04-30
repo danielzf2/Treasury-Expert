@@ -604,11 +604,54 @@ function renderAvTable(r) {
 function renderRiskFactors(r) {
     const el = document.getElementById("riskFactors");
     if (!r.risk_factors || !r.risk_factors.length) { el.innerHTML = ""; return; }
-    let html = '<div class="sim-card"><div class="sim-card-h">Fatores de Risco</div><table class="sim-tbl"><tr><th>Fator</th><th class="tc">Status</th><th>Descrição</th></tr>';
+    let html = '<div class="sim-card"><div class="sim-card-h">Fatores de Risco</div>';
+    html += '<table class="sim-tbl"><tr>';
+    html += '<th>Fator</th>';
+    html += '<th class="tc">Status</th>';
+    html += '<th class="tr">Exposição</th>';
+    html += '<th>Ação para zerar</th>';
+    html += '<th>Descrição</th>';
+    html += '</tr>';
     r.risk_factors.forEach(f => {
         const cls = f.exposto ? "pill-exp" : "pill-hdg";
         const txt = f.exposto ? "EXPOSTO" : "HEDGEADO";
-        html += `<tr><td class="bold">${f.fator}</td><td class="tc"><span class="${cls}">${txt}</span></td><td class="muted" style="font-size:10px">${f.desc}</td></tr>`;
+
+        // Coluna Exposição: combina R$ DV01 e bps quando disponíveis
+        const expParts = [];
+        if (f.exposicao_brl !== null && f.exposicao_brl !== undefined && Math.abs(f.exposicao_brl) > 0.01) {
+            const sign = f.exposicao_brl > 0 ? "" : "";
+            expParts.push(`<span class="bold">${fmtMoney(f.exposicao_brl, 0)}</span>`);
+        }
+        if (f.exposicao_bps !== null && f.exposicao_bps !== undefined && Math.abs(f.exposicao_bps) > 0.01) {
+            const bpsStr = `${f.exposicao_bps >= 0 ? "+" : ""}${f.exposicao_bps.toFixed(0)} bps`;
+            expParts.push(`<span class="muted" style="font-size:10px">${bpsStr}</span>`);
+        }
+        const expHtml = expParts.length
+            ? expParts.join("<br>")
+            : '<span class="muted" style="font-size:10px">—</span>';
+        const expCellCls = (f.exposto && f.exposicao_brl && Math.abs(f.exposicao_brl) > 0.01)
+            ? "tr scenario-cell" : "tr";
+
+        // Coluna Ação: bold no nome do instrumento + qtd
+        let acaoHtml = '<span class="muted" style="font-size:10px">—</span>';
+        if (f.acao) {
+            let acaoTxt = f.acao;
+            if (f.n_contratos_zero && f.instrumento_zero) {
+                acaoTxt = acaoTxt.replace(
+                    `${f.n_contratos_zero} ${f.instrumento_zero.split(" ")[0]}`,
+                    `<span class="bold blue">${f.n_contratos_zero} ${f.instrumento_zero.split(" ")[0]}</span>`,
+                );
+            }
+            acaoHtml = `<span style="font-size:11px">${acaoTxt}</span>`;
+        }
+
+        html += `<tr>
+            <td class="bold">${f.fator}</td>
+            <td class="tc"><span class="${cls}">${txt}</span></td>
+            <td class="${expCellCls} mono">${expHtml}</td>
+            <td>${acaoHtml}</td>
+            <td class="muted" style="font-size:10px">${f.desc}</td>
+        </tr>`;
     });
     html += "</table></div>";
     el.innerHTML = html;
@@ -744,31 +787,54 @@ function renderHedge(r) {
 
     const inst = h.hedge_instrument || "DI1";
     const tpfInst = h.tpf.instrument || "NTN-F";
+    const tpfDv01 = h.tpf.dv01_total;
+
+    // Helper: classifica residual em verde/laranja/vermelho conforme % do TPF DV01
+    const residClass = (resid) => {
+        const rel = Math.abs(resid) / Math.max(Math.abs(tpfDv01), 1);
+        if (rel < 0.05) return "green";
+        if (rel < 0.20) return "orange";
+        return "red";
+    };
 
     let html = '<hr class="divider"><div class="sim-card">';
     html += `<div class="sim-card-h">Hedge de ${tpfInst} com ${inst} — 3 Modalidades</div>`;
 
+    // Cards do topo: STATUS ATUAL da carteira (não opção 1)
+    html += '<div style="padding:0 14px;margin-top:10px">';
+    html += '<div class="muted" style="font-size:11px;margin-bottom:8px">';
+    html += '<span class="bold" style="color:#7a8ba0">Status atual da carteira</span> — DV01 do TPF vs hedge já contratado. As 3 modalidades abaixo mostram quanto adotar para zerar o residual.';
+    html += '</div></div>';
+
     html += '<div class="metrics" style="margin-bottom:12px">';
-    html += `<div class="metric"><div class="label">DV01 Total ${tpfInst}</div><div class="value">R$ ${fmtNumber(h.tpf.dv01_total,0)}</div></div>`;
-    html += `<div class="metric"><div class="label">${inst} atual</div><div class="value">${h.current_n} contratos</div></div>`;
-    html += `<div class="metric"><div class="label">DV01 residual</div><div class="value">R$ ${fmtNumber(h.dv01_residual,0)}</div></div>`;
+    html += `<div class="metric"><div class="label">DV01 Total ${tpfInst}</div><div class="value">R$ ${fmtNumber(tpfDv01,0)}</div></div>`;
+    html += `<div class="metric"><div class="label">${inst} já na carteira</div><div class="value">${h.current_n} contratos</div></div>`;
+    const residNowCls = residClass(h.dv01_residual);
+    html += `<div class="metric"><div class="label">Residual atual (não-hedgeado)</div><div class="value ${residNowCls}">R$ ${fmtNumber(h.dv01_residual,0)}</div></div>`;
     html += '</div>';
 
     html += '<div style="overflow-x:auto"><table class="sim-tbl">';
-    html += `<tr><th>Modalidade</th><th class="tc">Vértice ${inst}</th><th class="tr">DV01/contrato</th><th class="tr">Contratos</th><th>Obs</th></tr>`;
+    html += `<tr><th>Modalidade</th><th class="tc">Vértice ${inst}</th><th class="tr">DV01/contrato</th><th class="tr">Contratos</th><th class="tr">Residual após adotar</th><th>Obs</th></tr>`;
+
+    const residMat = h.residual_at_maturity ?? (tpfDv01 - h.n_at_maturity * h.dv01_at_maturity);
+    const residDur = h.residual_at_duration ?? (tpfDv01 - h.n_at_duration * h.dv01_at_duration);
+    const residStrip = h.residual_at_strip ?? 0;
 
     html += `<tr><td class="bold">1. No Vencimento</td><td class="tc mono">${h.du_maturity} DU</td>`;
     html += `<td class="tr mono">R$ ${fmtNumber(h.dv01_at_maturity,2)}</td>`;
     html += `<td class="tr mono">${h.n_at_maturity}</td>`;
+    html += `<td class="tr mono ${residClass(residMat)}">R$ ${fmtNumber(residMat,0)}</td>`;
     html += `<td class="muted" style="font-size:10px">Aproximação — descasa duration para títulos com cupom</td></tr>`;
 
     html += `<tr><td class="bold">2. Na Duration</td><td class="tc mono">${h.du_duration} DU</td>`;
     html += `<td class="tr mono">R$ ${fmtNumber(h.dv01_at_duration,2)}</td>`;
     html += `<td class="tr mono">${h.n_at_duration}</td>`;
+    html += `<td class="tr mono ${residClass(residDur)}">R$ ${fmtNumber(residDur,0)}</td>`;
     html += `<td class="muted" style="font-size:10px">Casamento de DV01 no prazo médio — funciona bem para shifts paralelos</td></tr>`;
 
     html += `<tr><td class="bold">3. Strip (Hedge Perfeito)</td><td class="tc">ver abaixo</td>`;
     html += `<td></td><td class="tr mono">${h.n_strip_total || 0}</td>`;
+    html += `<td class="tr mono ${residClass(residStrip)}">R$ ${fmtNumber(residStrip,0)}</td>`;
     html += `<td class="muted" style="font-size:10px">1 ${inst} por fluxo — elimina risco de inclinação e curvatura</td></tr>`;
     html += '</table></div>';
 
