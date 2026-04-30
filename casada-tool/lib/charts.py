@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from .instruments import INSTRUMENTS, _coupon_cashflows
 from .scenarios import (
     calc_scenario_delta, calc_leg_pnl, calc_leg_pnl_per_flow, get_spot_curve_for_leg,
@@ -160,7 +161,7 @@ def _legs_range(legs: list[dict], instruments: tuple, key: str = "du") -> tuple[
 
 def _add_legs_shading(fig: go.Figure, legs: list[dict], instruments: tuple,
                       key: str = "du", color: str = "rgba(88,166,255,0.06)",
-                      label: str = "Legs"):
+                      label: str = "Legs", row: int | None = None, col: int | None = None):
     """Adiciona uma faixa vertical sombreada no range das legs relevantes.
 
     Mostra visualmente onde a posicao esta na curva sem cortar o resto.
@@ -174,12 +175,16 @@ def _add_legs_shading(fig: go.Figure, legs: list[dict], instruments: tuple,
         spread = max(vmax * 0.015, 5)
         vmin -= spread
         vmax += spread
-    fig.add_vrect(
+    kwargs = dict(
         x0=vmin, x1=vmax,
         fillcolor=color, line_width=0, layer="below",
         annotation_text=label, annotation_position="top left",
         annotation_font_size=10, annotation_font_color="#8b949e",
     )
+    if row is not None and col is not None:
+        kwargs["row"] = row
+        kwargs["col"] = col
+    fig.add_vrect(**kwargs)
 
 
 def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
@@ -192,8 +197,13 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
 
     Plota curva DI interpolada via flat forward (suave) e opcionalmente
     a curva DAP quando NTN-B esta na operacao. Pernas destacadas como pontos.
+    Painel inferior mostra Delta bps em cada vertice DI no range visivel
+    (estilo Bloomberg GC Graph Curves).
     """
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.78, 0.22], vertical_spacing=0.06,
+    )
 
     rate_legs = sorted(
         [l for l in legs if _is_rate_leg(l)], key=lambda l: l["du"])
@@ -406,13 +416,74 @@ def chart_curva_antes_depois(legs: list[dict], scenario_key: str,
                         ))
 
     _add_legs_shading(fig, legs, ("LTN", "NTN-F", "LFT", "DI1", "NTN-B", "DAP"),
-                       label="Posicao")
+                       label="Posicao", row=1, col=1)
+
+    # ====================================================================
+    # Painel inferior: barras de Delta bps em cada vertice DI no range visivel.
+    # Estilo Bloomberg GC Graph Curves — mostra exatamente o choque aplicado
+    # em cada ponto liquido da curva (3M, 6M, 1Y, 2Y, ..., 10Y).
+    # ====================================================================
+    if di1_curve:
+        try:
+            from datetime import date
+            from .calendar import default_liq_date
+            from .curves import build_di_vertices
+            liq = default_liq_date(date.today())
+            di_verts = build_di_vertices(di1_curve, liq) or []
+        except Exception:
+            di_verts = []
+
+        vertex_dus = [d for d, _ in di_verts if d <= du_view_max and d > 0]
+        if vertex_dus:
+            vertex_deltas = [
+                calc_scenario_delta(
+                    du, SCENARIO_DU_SHORT, SCENARIO_DU_LONG, scenario_key, magnitude,
+                    custom_parallel_bps, custom_slope_bps, custom_curvature_bps,
+                )
+                for du in vertex_dus
+            ]
+            bar_colors = [
+                _GREEN if d > 0.01 else (_RED if d < -0.01 else _MUTED)
+                for d in vertex_deltas
+            ]
+            tick_labels = [_du_to_tenor_label(du) for du in vertex_dus]
+
+            fig.add_trace(
+                go.Bar(
+                    x=vertex_dus, y=vertex_deltas,
+                    marker_color=bar_colors,
+                    text=[f"{d:+.0f}" for d in vertex_deltas],
+                    textposition="outside",
+                    textfont=dict(size=9, color="#c9d1d9"),
+                    customdata=tick_labels,
+                    hovertemplate="%{customdata} (%{x} DU)<br>Δ %{y:+.1f} bps<extra></extra>",
+                    showlegend=False, name="Δ bps",
+                ),
+                row=2, col=1,
+            )
+
     fig.update_layout(
-        **_base_layout("Curva de Juros — Flat Forward", 450),
-        xaxis=dict(title="Prazo (DU)", gridcolor=_GRID, range=[0, du_view_max]),
-        yaxis=dict(title="Taxa (% a.a.)", tickformat=".2f", gridcolor=_GRID),
+        **_base_layout("Curva de Juros — Flat Forward", 520),
     )
+    fig.update_yaxes(title="Taxa (% a.a.)", tickformat=".2f", gridcolor=_GRID, row=1, col=1)
+    fig.update_yaxes(title="Δ bps", gridcolor=_GRID, zeroline=True, zerolinecolor=_ZERO,
+                      zerolinewidth=1, row=2, col=1)
+    fig.update_xaxes(range=[0, du_view_max], row=1, col=1, gridcolor=_GRID)
+    fig.update_xaxes(title="Prazo (DU)", range=[0, du_view_max], row=2, col=1, gridcolor=_GRID)
     return fig
+
+
+def _du_to_tenor_label(du: int) -> str:
+    """Converte DU em label de tenor (3M, 1Y, 5Y) similar ao Bloomberg."""
+    if du <= 0:
+        return "0"
+    months = round(du * 12 / 252)
+    if months < 12:
+        return f"{months}M"
+    years = round(du / 252, 1)
+    if years == int(years):
+        return f"{int(years)}Y"
+    return f"{years:.1f}Y"
 
 
 def chart_pnl_barras(legs: list[dict], scenario_key: str,
