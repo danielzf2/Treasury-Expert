@@ -122,11 +122,36 @@ routes = [
     Mount("/mcp", app=mcp_app),
 ]
 
+class NoCacheStaticFiles(StaticFiles):
+    """Static files com 'Cache-Control: no-cache, must-revalidate'.
+
+    Browser sempre revalida (envia If-Modified-Since); servidor responde 304
+    se o arquivo nao mudou. Garante que mudancas em app.js/style.css/index.html
+    apareçam imediatamente (sem hard refresh manual) — sem perder eficiencia
+    porque arquivos inalterados nao sao re-baixados.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
+async def serve_index_no_cache(request):
+    if INDEX_HTML.exists():
+        return FileResponse(
+            str(INDEX_HTML),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
+    return JSONResponse({"error": "Frontend not found"}, status_code=404)
+
+
 if STATIC_DIR.exists():
-    routes.append(Mount("/static", app=StaticFiles(directory=str(STATIC_DIR))))
-    routes.append(Route("/", serve_index))
-    routes.append(Route("/{path:path}", serve_index))
-    log.info("Serving frontend from %s", STATIC_DIR)
+    routes.append(Mount("/static", app=NoCacheStaticFiles(directory=str(STATIC_DIR))))
+    routes.append(Route("/", serve_index_no_cache))
+    routes.append(Route("/{path:path}", serve_index_no_cache))
+    log.info("Serving frontend from %s (no-cache)", STATIC_DIR)
 
 app = Starlette(routes=routes, lifespan=mcp_app.lifespan)
 
