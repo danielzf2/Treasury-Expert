@@ -1,0 +1,119 @@
+CÉLULA,VALOR / FÓRMULA,DESCRIÇÃO
+,,
+=== CENÁRIO SELIC — CORTES COPOM (a partir da linha 55) ===,,
+,,
+B55,CENÁRIO SELIC — CORTES COPOM,Título da seção
+,,
+B57,Reunião,Header
+C57,Data,Header
+D57,Selic Mercado (% a.a.),Header
+E57,Selic Macro (% a.a.),Header
+F57,Corte Mercado (bps),Header
+G57,Corte Macro (bps),Header
+H57,Diff por Copom (bps),Header
+I57,Diff Acumulada (bps),Header
+,,
+B58,Hoje,Referência
+C58,05/05/2026,Data atual
+D58,14.65,INPUT: Selic atual
+E58,14.65,Igual (referência)
+F58,—,
+G58,—,
+H58,0,Zero (base)
+I58,0,Zero (base)
+,,
+B59,Copom 1,
+C59,18/06/2026,Data do Copom
+D59,14.15,INPUT: Selic que mercado precifica após Copom 1
+E59,14.40,INPUT: Selic que macro Nubank projeta
+F59,=(D59-D58)*100,Corte implícito no mercado em bps
+G59,=(E59-E58)*100,Corte projetado pela macro em bps
+H59,=(E59-D59)*100,Surpresa: macro vs mercado em bps
+I59,=I58+H59,Diff acumulada em bps
+,,
+B60,Copom 2,
+C60,05/08/2026,
+D60,13.65,INPUT: Selic mercado
+E60,14.15,INPUT: Selic macro
+F60,=(D60-D59)*100,
+G60,=(E60-E59)*100,
+H60,=(E60-D60)*100,
+I60,=I59+H60,
+,,
+B61,Copom 3,
+C61,30/09/2026,
+D61,13.40,INPUT: Selic mercado
+E61,14.00,INPUT: Selic macro
+F61,=(D61-D60)*100,
+G61,=(E61-E60)*100,
+H61,=(E61-D61)*100,
+I61,=I60+H61,
+,,
+B62,Copom 4,
+C62,10/12/2026,
+D62,13.15,INPUT: Selic mercado
+E62,13.90,INPUT: Selic macro
+F62,=(D62-D61)*100,
+G62,=(E62-E61)*100,
+H62,=(E62-D62)*100,
+I62,=I61+H62,
+,,
+B63,Copom 5,
+C63,05/02/2027,
+D63,13.00,INPUT: Selic mercado
+E63,13.75,INPUT: Selic macro
+F63,=(D63-D62)*100,
+G63,=(E63-E62)*100,
+H63,=(E63-D63)*100,
+I63,=I62+H63,
+,,
+B64,Copom 6,
+C64,19/03/2027,
+D64,12.75,INPUT: Selic mercado
+E64,13.65,INPUT: Selic macro
+F64,=(D64-D63)*100,
+G64,=(E64-E63)*100,
+H64,=(E64-D64)*100,
+I64,=I63+H64,
+,,
+=== IMPACTO NO P&L (abaixo da tabela Copom) ===,,
+,,
+B67,IMPACTO NO P&L,Título
+,,
+B69,Avaliar até Copom nº,Label
+C69,4,INPUT: mude de 1 a 6 para escolher o horizonte
+,,
+B70,Diff Acumulada (bps),Label
+C70,"=ÍNDICE(I58:I64;C69+1)",Pega a diff acumulada até o Copom escolhido
+,,
+B72,P&L NTN-F (R$),Label
+C72,"=-SOMA($M$15:$M$51)*C70","DV01 total × diff acumulada = perda/ganho da NTN-F"
+,,
+B73,P&L DI1 Hedge Vcto (R$),Label
+C73,"=$U$22*$T$22*C70","Contratos × DV01/contrato × diff = ganho/perda do hedge"
+,,
+B74,P&L Total com hedge (R$),Label
+C74,=C72+C73,NTN-F + DI1 = líquido
+,,
+B75,P&L sem hedge (R$),Label
+C75,=C72,Só a NTN-F sem proteção
+,,
+=== REFERÊNCIAS DAS CÉLULAS ===,,
+,,
+M15:M51,DV01 Total por fluxo (coluna M),Já existente na planilha
+S16,DI1 Taxa (% a.a.) = 13.65,Input do hedge
+T17,DV01 Total NTN-F = 2896.24,Fórmula existente
+T22,DV01/contrato do DI1 no vencimento = 22.53,Fórmula existente
+U22,Contratos DI1 no vencimento = 129,Fórmula existente
+,,
+=== COMO USAR ===,,
+,,
+1,"Preencha coluna D (Selic Mercado) com as forwards implícitas da curva DI",
+2,"Preencha coluna E (Selic Macro) com as projeções da equipe macro Nubank",
+3,"Mude C69 (1 a 6) para ver P&L em diferentes horizontes",
+4,"Coluna F mostra quanto o mercado espera de corte por Copom",
+5,"Coluna G mostra quanto a macro projeta de corte",
+6,"Coluna H mostra a 'surpresa' por Copom (positivo = menos dovish)",
+7,"Coluna I acumula as surpresas",
+8,"C72 = P&L da NTN-F se a macro acertar",
+9,"C74 = P&L líquido com hedge DI1 no vencimento",

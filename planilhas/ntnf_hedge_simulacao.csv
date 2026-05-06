@@ -1,0 +1,69 @@
+SIMULAÇÃO DE HEDGE NTN-F COM DI1 — ANÁLISE DE RISCO DE INCLINAÇÃO
+Baseado em: Mercado de Renda Fixa cap. 16 (Hedge por Duration / Fluxo de Caixa) + Rebonato (PCA Level/Slope/Curvature)
+,,,,,,,,,,,
+PASSO 1 — INPUTS DA OPERAÇÃO,,,,,,,,,,,
+Instrumento,NTN-F,,,,,,,,,,
+Ticker,F31,,,,,,,,,,
+Vencimento,01/01/2031,,,,,,,,,,
+Taxa de Mercado (% a.a.),13.80,,,,,,,,,,
+Cupom Semestral (% a.a.),10.00,,,,,,,,,,
+Cup Semestral (rate),=((1+B6/100)^0.5)-1,"= 4.880885%",,,,,,,,,
+Quantidade,2000,,,,,,,,,,
+Direção,Compra,,,,,,,,,,
+,,,,,,,,,,,
+PASSO 2 — FLUXOS DE CAIXA E KRD,,,,,,,,,,,
+"Para cada fluxo k: PV_k = FC_k / (1 + TIR)^(DU_k/252)",,,,,,,,,,,
+"KRD_k = (DU_k/252) × (PV_k / PU_total)",,,,,,,,,,,
+"DV01_k = D_mod_k × PV_k × 0.0001 × Quantidade",,,,,,,,,,,
+,,,,,,,,,,,
+Fluxo,Data Pgto,DU,FC (R$/unidade),PV (R$/unidade),Peso (%),KRD (anos),D.Mod Fluxo,DV01/unidade,DV01 Total,Taxa Curva Spot,Spread Crédito
+Cupom 1,01/07/2026,42,"=B7*1000","=D17/(1+$B$6/100)^(C17/252)","=E17/SUM(E$17:E$26)*100","=(C17/252)*F17/100","=G17/(1+$B$6/100)","=H17*E17*0.0001","=I17*$B$8","=preencher","=B6/100-K17"
+Cupom 2,01/01/2027,168,"=B7*1000","=D18/(1+$B$6/100)^(C18/252)","=E18/SUM(E$17:E$26)*100","=(C18/252)*F18/100","=G18/(1+$B$6/100)","=H18*E18*0.0001","=I18*$B$8","=preencher","=B6/100-K18"
+Cupom 3,01/07/2027,291,"=B7*1000","=D19/(1+$B$6/100)^(C19/252)","=E19/SUM(E$17:E$26)*100","=(C19/252)*F19/100","=G19/(1+$B$6/100)","=H19*E19*0.0001","=I19*$B$8","=preencher","=B6/100-K19"
+Cupom 4,01/01/2028,419,"=B7*1000","=D20/(1+$B$6/100)^(C20/252)","=E20/SUM(E$17:E$26)*100","=(C20/252)*F20/100","=G20/(1+$B$6/100)","=H20*E20*0.0001","=I20*$B$8","=preencher","=B6/100-K20"
+Cupom 5,01/07/2028,543,"=B7*1000","=D21/(1+$B$6/100)^(C21/252)","=E21/SUM(E$17:E$26)*100","=(C21/252)*F21/100","=G21/(1+$B$6/100)","=H21*E21*0.0001","=I21*$B$8","=preencher","=B6/100-K21"
+Cupom 6,01/01/2029,667,"=B7*1000","=D22/(1+$B$6/100)^(C22/252)","=E22/SUM(E$17:E$26)*100","=(C22/252)*F22/100","=G22/(1+$B$6/100)","=H22*E22*0.0001","=I22*$B$8","=preencher","=B6/100-K22"
+Cupom 7,01/07/2029,791,"=B7*1000","=D23/(1+$B$6/100)^(C23/252)","=E23/SUM(E$17:E$26)*100","=(C23/252)*F23/100","=G23/(1+$B$6/100)","=H23*E23*0.0001","=I23*$B$8","=preencher","=B6/100-K23"
+Cupom 8,01/01/2030,916,"=B7*1000","=D24/(1+$B$6/100)^(C24/252)","=E24/SUM(E$17:E$26)*100","=(C24/252)*F24/100","=G24/(1+$B$6/100)","=H24*E24*0.0001","=I24*$B$8","=preencher","=B6/100-K24"
+Cupom 9,01/07/2030,1039,"=B7*1000","=D25/(1+$B$6/100)^(C25/252)","=E25/SUM(E$17:E$26)*100","=(C25/252)*F25/100","=G25/(1+$B$6/100)","=H25*E25*0.0001","=I25*$B$8","=preencher","=B6/100-K25"
+Principal+Cupom,01/01/2031,1168,"=(1+B7)*1000","=D26/(1+$B$6/100)^(C26/252)","=E26/SUM(E$17:E$26)*100","=(C26/252)*F26/100","=G26/(1+$B$6/100)","=H26*E26*0.0001","=I26*$B$8","=preencher","=B6/100-K26"
+TOTAL,,,,"=SUM(E17:E26)","=SUM(F17:F26)","=SUM(G17:G26)",,,"=SUM(J17:J26)",,
+,,,,,,,,,,,
+PASSO 3 — HEDGE COM 1 DI1 NO VENCIMENTO (Modalidade 1),,,,,,,,,,,
+DI1 Vértice (DU),"=C26",,,,,,,,,,
+DI1 Taxa (% a.a.),13.65,,,,,,,,,,
+DI1 DV01/contrato,"=formula: DV01 do DI1 no DU do vencimento",,,,,,,,,,,
+Contratos DI1,"=ROUND(J27/B32,0)",,,,,,,,,,
+DV01 Hedge Total,"=B33*B32",,,,,,,,,,
+DV01 Residual,"=J27-B34",,,,,,,,,,
+,,,,,,,,,,,
+PASSO 4 — SIMULAÇÃO DE CENÁRIOS (P&L por fluxo),,,,,,,,,,,
+"Para cada fluxo k: Delta_k = choque aplicado no DU_k",,,,,,,,,,,
+"New_PV_k = FC_k / (1 + taxa_spot_k + spread + delta_k/100)^(DU_k/252)",,,,,,,,,,,
+"P&L_k = (New_PV_k - Old_PV_k) × Quantidade",,,,,,,,,,,
+"P&L_DI1 = -DV01_DI1_total × delta_DI1 (no vencimento)",,,,,,,,,,,
+,,,,,,,,,,,
+Cenário,Descrição,Choque Curto (bps),Choque Longo (bps),P&L NTN-F,P&L DI1 Hedge,P&L Total,Comentário,,,,
+Bear Parallel +10bp,"Toda curva sobe 10bp uniformemente",10,10,"=soma dos delta_PV × qty","=-DV01_DI1_total × 10","=E44+F44","DV01 casado — P&L ≈ 0 (só convexidade residual)",,,,
+Bear Parallel +50bp,"Toda curva sobe 50bp",50,50,"=soma","=-DV01×50","=E45+F45","P&L pequeno (convexidade)",,,,
+Bull Parallel -50bp,"Toda curva cai 50bp",-50,-50,"=soma","=-DV01×(-50)","=E46+F46","Simetria com convexidade",,,,
+Bear Steepener +30bp,"Curtos +0; Longos +30bp",0,30,"=soma gradual","=-DV01×~23bp","=E47+F47","P&L NEGATIVO — cupons curtos sem hedge absorvem menos choque que o DI1 no longo",,,,
+Bear Flattener +30bp,"Curtos +30bp; Longos +0bp",30,0,"=soma gradual","=-DV01×~7bp","=E48+F48","P&L POSITIVO — cupons curtos chocam mas DI1 no vencimento mal move",,,,
+Positive Butterfly +20bp,"Barriga sobe; pontas caem",20,-10,"=soma","=-DV01×~(-10)bp","=E49+F49","P&L depende dos cupons intermediários vs principal",,,,
+,,,,,,,,,,,
+PASSO 5 — COMPARAÇÃO: STRIP vs VENCIMENTO,,,,,,,,,,,
+"Se fizesse STRIP (1 DI1 por fluxo): P&L ≈ 0 em TODOS os cenários",,,,,,,,,,,
+"Diferença = P&L(Vcto) - P&L(Strip) mostra o CUSTO DO MISMATCH de inclinação",,,,,,,,,,,
+,,,,,,,,,,,
+Cenário,P&L com DI1 Vcto,P&L com Strip (≈0),Custo do Mismatch,Comentário,,,,,,,
+Bear Parallel +10bp,"=E44","≈ 0","=B56-C56","Pequeno (DV01 match funciona em paralelo)",,,,,,,
+Bear Steepener +30bp,"=E47","≈ 0","=B57-C57","GRANDE — esse é o risco de inclinação",,,,,,,
+Bear Flattener +30bp,"=E48","≈ 0","=B58-C58","GRANDE oposto — flattener beneficia vcto-hedge",,,,,,,
+Positive Butterfly +20bp,"=E49","≈ 0","=B59-C59","Moderado — depende de onde está a barriga",,,,,,,
+,,,,,,,,,,,
+INSTRUÇÕES,,,,,,,,,,,
+"1. Abra este CSV no Google Sheets (Arquivo > Importar > Upload)",,,,,,,,,,,
+"2. As fórmulas com '=preencher' precisam da curva DI do dia (use o MCP treasury-docs ou o site da B3)",,,,,,,,,,,
+"3. As fórmulas de P&L nos cenários precisam ser preenchidas manualmente conforme o modelo acima",,,,,,,,,,,
+"4. Ou use o simulador web (localhost:8000) que já faz tudo isso automaticamente",,,,,,,,,,,
+"5. A planilha serve para ENTENDER a mecânica — o simulador serve para OPERAR",,,,,,,,,,,

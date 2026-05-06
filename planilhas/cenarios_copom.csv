@@ -1,0 +1,36 @@
+,Y,Z,AA,AB,AC,AD,AE,AF
+14,CENARIO SELIC - COPOM,,,,,,
+15,Reuniao,Data Decisao,DI1 Vertice,Taxa DI1 (%a.a.),DU,Selic Forward (%a.a.),Selic Macro (%a.a.),Diff Acum (bps)
+16,Referencia,06/05/2026,DI1M26,14.400,18,14.65,14.65,0
+17,Copom 4 (Jun),17/06/2026,DI1N26,14.364,39,formula,=INPUT,=AF16+(AE17-AD17)*100
+18,Copom 5 (Ago),05/08/2026,DI1U26,14.268,83,formula,=INPUT,=AF17+(AE18-AD18)*100
+19,Copom 6 (Set),16/09/2026,DI1V26,14.238,104,formula,=INPUT,=AF18+(AE19-AD19)*100
+20,Copom 7 (Nov),04/11/2026,DI1Z26,14.184,144,formula,=INPUT,=AF19+(AE20-AD20)*100
+21,Copom 8 (Dez),09/12/2026,DI1F27,14.148,166,formula,=INPUT,=AF20+(AE21-AD21)*100
+,,,,,,,,
+,,,,,,,,
+23,IMPACTO NO P&L,,,,,,
+24,Avaliar ate Copom nr,4,,,,,,
+25,Diff Acumulada (bps),"=INDICE(AF16:AF21;Z24+1)",,,,,,
+,,,,,,,,
+27,P&L NTN-F paralelo (R$),"=-SOMA($M$15:$M$51)*Z25",,,,,,
+28,P&L DI1 Hedge Vcto (R$),"=$V$22*$U$22*Z25",,,,,,
+29,P&L Total paralelo (R$),=Z27+Z28,,,,,,
+,,,,,,,,
+,,,,,,,,
+32,P&L NAO-PARALELO,,,,,,
+33,"Se a surpresa fica concentrada no front e nao transmite 100% pro longo:",,,,,,
+34,Transmissao pro longo (%),50%,"INPUT: quanto da surpresa Copom chega no DU longo (100%=paralelo; 0%=so front)",,,,
+,,,,,,,,
+36,Choque curto (bps),=Z25,"(absorve 100% — cupons curtos da NTN-F com DU < 252)",,,,
+37,Choque longo (bps),=Z25*Z34,"(absorve X% — principal e cupons longos da NTN-F)",,,,
+,,,,,,,,
+39,P&L NTN-F nao-paralelo,"=-SOMARPRODUTO($M$15:$M$51;SE($F$15:$F$51<=252;1;$Z$34))*Z25",,,,,,
+40,P&L DI1 Hedge Vcto,"=$V$22*$U$22*Z37","(DI1 no DU 1167 absorve o choque longo)",,,,
+41,P&L Total nao-paralelo,=Z39+Z40,,,,,,
+,,,,,,,,
+43,COMPARACAO,,,,,,
+44,Cenario,P&L Total,,,,,,
+45,Paralelo (100% transmissao),=Z29,,,,,,
+46,Nao-paralelo,=Z41,,,,,,
+47,Diferenca (risco inclinacao),=Z41-Z29,,,,,,
