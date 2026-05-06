@@ -613,8 +613,15 @@ function renderRiskFactors(r) {
     html += '<th>Descrição</th>';
     html += '</tr>';
     r.risk_factors.forEach(f => {
-        const cls = f.exposto ? "pill-exp" : "pill-hdg";
-        const txt = f.exposto ? "EXPOSTO" : "HEDGEADO";
+        // Status: BASE (CDI/Selic, taxa-numeraria) > HEDGEADO (cancela) > EXPOSTO (risco real)
+        let cls, txt;
+        if (f.is_base) {
+            cls = "pill-base"; txt = "BASE";
+        } else if (f.exposto) {
+            cls = "pill-exp"; txt = "EXPOSTO";
+        } else {
+            cls = "pill-hdg"; txt = "HEDGEADO";
+        }
 
         // Coluna Exposição: combina R$ DV01 e bps quando disponíveis
         const expParts = [];

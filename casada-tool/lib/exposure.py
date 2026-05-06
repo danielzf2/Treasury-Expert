@@ -604,7 +604,8 @@ def _enrich_factor(factor: dict, *, exposicao_brl: float | None = None,
                    exposicao_bps: float | None = None,
                    n_contratos_zero: int | None = None,
                    instrumento_zero: str | None = None,
-                   acao: str | None = None) -> dict:
+                   acao: str | None = None,
+                   is_base: bool = False) -> dict:
     """Adiciona campos quantitativos ao fator de risco.
 
     - exposicao_brl: R$ DV01 da exposicao nao-hedgeada (None se N/A)
@@ -612,12 +613,19 @@ def _enrich_factor(factor: dict, *, exposicao_brl: float | None = None,
     - n_contratos_zero: qtd do instrumento para zerar (None se N/A)
     - instrumento_zero: ex 'DI1 F32' (None se N/A)
     - acao: texto curto descrevendo como zerar
+    - is_base: True quando o fator e BASE/numerario (CDI/Selic) - taxa
+      livre de risco / referencia do mercado pos-fixado, nao um risco
+      a ser neutralizado. Frontend renderiza como BASE (azul) em vez de
+      EXPOSTO (vermelho) ou HEDGEADO (verde). Ref: Mercado Financeiro
+      Assaf cap.7.6 ('Selic taxa de mais baixo risco, referencia para
+      as demais') + Liquidez De Mercado/DI Futuro Introducao.
     """
     factor["exposicao_brl"] = exposicao_brl
     factor["exposicao_bps"] = exposicao_bps
     factor["n_contratos_zero"] = n_contratos_zero
     factor["instrumento_zero"] = instrumento_zero
     factor["acao"] = acao
+    factor["is_base"] = is_base
     return factor
 
 
@@ -784,6 +792,11 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                     exposicao_brl=0.0, acao="OK em 1a ordem"))
 
     # === CAMADA 1: MOTOR — fatores derivados de net_exposure (SEMPRE roda) ===
+    # NOTA SOBRE CDI: CDI/Selic eh a taxa-base (numerario) flutuante, nao um
+    # fator de risco com DV01 a ser neutralizado. Operacoes pos-fixadas
+    # PRODUZEM resultado em "CDI + spread" — o CDI eh o objetivo, nao o risco.
+    # Marcamos CDI como is_base=True (renderizado como BASE/azul, nao
+    # EXPOSTO/vermelho). Ref: Assaf cap.7.6 + Liquidez De Mercado/DI Futuro.
     net = strategy.get("net_exposure")
     if net:
         for c in net["cancelled"]:
@@ -793,6 +806,7 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             dv01_a = c.get("dv01_ativo", 0)
             dv01_p = c.get("dv01_passivo", 0)
             mismatch = round(abs(dv01_a - dv01_p), 2)
+            is_cdi = c["factor"] == "CDI"
             hedge_inst = _hedge_inst_for_factor(c["factor"], has_ntnb)
             du_ref, taxa_ref = _ref_du_taxa(legs, hedge_inst)
             n_zero = _n_to_zero(mismatch, hedge_inst, du_ref, taxa_ref)
@@ -814,8 +828,14 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
                     n_contratos_zero=n_zero, instrumento_zero=inst_label,
                     acao=f"Adicionar {n_zero or '?'} {hedge_inst} na perna menor para zerar mismatch DV01"))
             else:
-                # >= 80%: hedge efetivo
-                if c["spread_bps"]:
+                # >= 80%: hedge efetivo. CDI cancelando vira BASE (numerario)
+                if is_cdi:
+                    factors.append(_enrich_factor(
+                        {"fator": "CDI (base)", "exposto": False,
+                         "desc": f"CDI cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} — taxa-base do resultado pos-fixado"},
+                        is_base=True,
+                        acao="CDI eh a taxa-base (numerario). Resultado pos-fixado — nada a hedgear"))
+                elif c["spread_bps"]:
                     factors.append(_enrich_factor(
                         {"fator": f"{c['factor']} (cancela)", "exposto": False,
                          "desc": f"{c['factor']} cancela entre {', '.join(c['ativo_legs'])} e {', '.join(c['passivo_legs'])} (spread {c['spread_bps']:+.0f} bps, DV01 {ratio_pct}%)"},
@@ -832,6 +852,18 @@ def analyze_risk_factors(legs: list[dict], strategy: dict) -> list[dict]:
             # DV01 residual: soma DV01 dos entries da bag para esse fator/lado
             bag_for_factor = net.get("bags", {}).get(r["factor"], {}).get(r["side"], [])
             res_dv01 = round(sum(e.get("dv01", 0) for e in bag_for_factor), 2)
+            is_cdi = r["factor"] == "CDI"
+
+            if is_cdi:
+                # CDI residual = resultado pos-fixado da operacao (numerario)
+                # Nao eh risco a se neutralizar.
+                factors.append(_enrich_factor(
+                    {"fator": "CDI (base)", "exposto": False,
+                     "desc": f"{r['direction'].capitalize()} CDI — resultado pos-fixado da operacao (taxa-base, numerario)"},
+                    is_base=True,
+                    acao="CDI eh a taxa-base. Para zerar exposicao pos-fixada total: desmontar a operacao"))
+                continue
+
             hedge_inst = _hedge_inst_for_factor(r["factor"], has_ntnb)
             du_ref, taxa_ref = _ref_du_taxa(legs, hedge_inst)
             n_zero = _n_to_zero(res_dv01, hedge_inst, du_ref, taxa_ref)
