@@ -1,138 +1,13 @@
 ---
 title: "Dívida Pública: a experiência brasileira"
 source_pdf: "livro_eletronico_completo.pdf"
-converter: "pdftotext -layout"
-date_converted: "2026-08-27T14:59:02Z"
+converter: "pdftotext -layout + toc-title-map"
+date_converted: "2026-08-27T21:13:44Z"
 category: "books"
 sanitized: true
 reviewed: false
 publisher: "Secretaria do Tesouro Nacional e Banco Mundial, 2009"
 ---
-
-DÍVIDA PÚBLICA
-A Experiência Brasileira
-
-DÍVIDA PÚBLICA:
-          a experiência brasileira
-
-2   Dívida Pública: a experiência brasileira
-
-Anderson Caputo Silva
-            Lena Oliveira de Carvalho
-           Otavio Ladeira de Medeiros
-                 (Organizadores)
-
-
-DÍVIDA PÚBLICA:
-          a experiência brasileira
-
-
-                  Brasília, 2009
-
-Ministro de Estado da Fazenda
-Guido Mantega
-
-Secretário-Executivo
-Nelson Machado
-
-Secretário do Tesouro Nacional
-Arno Hugo Augustin Filho
-
-Secretários-Adjuntos
-Cleber Ubiratan de Oliveira
-Eduardo Coutinho Guerra
-Líscio Fábio de Brasil Camargo
-Marcus Pereira Aucélio
-Paulo Fontoura Valle
-
-Organizadores
-Anderson Caputo Silva (Banco Mundial)
-Lena Oliveira de Carvalho (Tesouro Nacional)
-Otavio Ladeira de Medeiros (Tesouro Nacional)
-
-Coordenação Editorial: Banco Mundial e Tesouro Nacional
-Revisão de Texto: Yana Palankof, Rejane de Meneses, Tereza Vitale
-Diagramação e Impressão: Estação Gráfica Ltda.
-Tiragem: 2.000 exemplares
-
-
-                        Dívida Pública : a experiência brasileira / Anderson Caputo Silva, Lena Oliveira de Carvalho, Otavio Ladeira de
-                             Medeiros (organizadores). – Brasília : Secretaria do Tesouro Nacional : Banco Mundial, 2009.
-                             502 p.
-
-                             Inclui bibliografia e índice
-                             ISBN 978-85-87841-34-6
-
-                              1. Dívida pública – Brasil. 2. Dívida pública – Brasil – Planejamento estratégico. 3. Títulos públicos – Brasil. 4.
-                        Mercado financeiro – Brasil. I. Silva, Anderson Caputo. II. Carvalho, Lena Oliveira de. III. Medeiros, Otavio Ladeira de.
-                        IV. Brasil. Secretaria do Tesouro Nacional. V. Banco Mundial. Sustentabilidade. Conceitos e Estatísticas. Planejamento
-                        Estratégico Gerenciamento de Risco. Orçamento e Auditoria. Mercado Primário e Secundário. Tesouro Direto. Base
-                        de Investidores. I. Banco Mundial. II. Tesouro Nacional. III. Organizadores. Título.
-
-                                                                                                            CDD 336.340981
-                                                                                                            CDU 336.3(81)
-
-
-Copyright © Tesouro Nacional, 2009
-Todos os direitos reservados à Secretaria do Tesouro Nacional – Brasília-DF. Nenhuma parte desta publicação poderá ser reproduzida ou transmitida
-sem prévia autorização por escrito da instituição. Para permissão de fotocópia ou reimpressão de qualquer parte deste livro, envie, por favor, uma
-solicitação para:
-Secretaria do Tesouro Nacional
-Coordenação-geral de Desenvolvimento Institucional (Codin)
-Esplanada dos Ministérios, Ministério da Fazenda (MF)
-Bloco P, ed. anexo do MF, ala A, Térreo
-CEP: 70.048-900 – Brasília, DF – Brasil
-Telefone: (55) 61 3412-3973 – Fax: (55) 61 3412-1623
-e-mail: [e-mail removido]
-
-Este livro foi elaborado por vários autores, dentre os quais servidores do Tesouro Nacional e do Banco Mundial. As opiniões, interpretações e
-conclusões expressas neste livro são exclusivamente dos autores e não refletem necessariamente as opiniões dessas instituições. O Tesouro Nacional
-e o Banco Mundial se isentam da responsabilidade sobre a exatidão dos dados incluídos no trabalho.
-
-4                                                                                                               Dívida Pública: a experiência brasileira
-
-SUMÁRIO
-
-
-Carta de apresentação da Secretaria do Tesouro Nacional...................................................................... 07
-Carta de apresentação do Banco Mundial.................................................................................................. 09
-Agradecimentos......................................................................................................................................... 11
-Prefácio .................................................................................................................................................. 13
-Introdução ...........................................................................................................................................17
-
-
-Parte 1 – ENTENDENDO A DÍVIDA PÚBLICA BRASILEIRA
-
-Capítulo 1 Origem e história da dívida pública no Brasil até 1963............................................... 33
-Anderson Caputo Silva
-
-Capítulo 2 História da dívida pública no Brasil: de 1964 até os dias atuais............................................ 57
-Guilherme Binato Villela Pedras
-
-Capítulo 3 Sustentabilidade da dívida pública........................................................................ 81
-Carlos Eugênio Ellery Lustosa da Costa
-
-Capítulo 4 Conceitos e estatísticas da dívida pública........................................................................ 101
-Aline Dieguez B. de Meneses Silva e Otavio Ladeira de Medeiros
-
-
-Parte 2 – O GERENCIAMENTO DA DÍVIDA PÚBLICA BRASILEIRA
-
-Capítulo 1 Estrutura institucional e eventos recentes na administração
-da Dívida Pública Federal.......................................................................................................131
-Karla de Lima Rocha
-
-Capítulo 2 Planejamento estratégico da Dívida Pública Federal ..............................................149
-Luiz Fernando Alves e Anderson Caputo Silva
-
-Capítulo 3 Gerenciamento de riscos da Dívida Pública Federal ...............................................173
-Anderson Caputo Silva, Rodrigo Cabral e William Baghdassarian
-
-Capítulo 4 O Orçamento e a Dívida Pública Federal ............................................................... 219
-Antônio de Pádua Ferreira Passos e Priscila de Souza Cavalcante Castro
-
-Capítulo 5 Marcos regulatórios e auditoria governamental da dívida pública ................................ 243
-Laércio M. Vieira
 
 Parte 3 – O MERCADO DE DÍVIDA PÚBLICA NO BRASIL
 
@@ -166,7 +41,8 @@ Parte 3 – O MERCADO DE DÍVIDA PÚBLICA NO BRASIL
 
 6                                                                                                               Dívida Pública: a experiência brasileira
 
-Carta de apresentação da Secretaria do Tesouro Nacional
+## Carta de apresentação da Secretaria do Tesouro Nacional
+
 
        É com satisfação que apresentamos esta obra, fruto de uma gratificante parceria entre a Secretaria
 do Tesouro Nacional e o Banco Mundial. O livro, como poderá ser observado já em suas primeiras linhas,
@@ -212,7 +88,7 @@ considerá-la uma significativa contribuição para a sociedade brasileira.
 
 8   Dívida Pública: a experiência brasileira
 
-Carta de apresentação do Banco Mundial
+## Carta de apresentação do Banco Mundial
 
 
        O Banco Mundial muito se orgulha do lançamento desta obra em conjunto com a Secretaria do
@@ -254,7 +130,7 @@ importantes para o crescimento do país.
 
 10   Dívida Pública: a experiência brasileira
 
-Agradecimentos
+## Agradecimentos
 
 
       Este livro é um projeto que vem sendo pensado, desenhado e estruturado há algum tempo pelos
@@ -278,7 +154,8 @@ essenciais para o aprimoramento e o entendimento dos capítulos e de sua estrutu
 
 12   Dívida Pública: a experiência brasileira
 
-Prefácio
+## Prefácio
+
 
                                                                                                    Murilo Portugal Filho1
 
@@ -408,7 +285,8 @@ dívida pública brasileira tanto em nosso país quanto no exterior.
 
 16   Dívida Pública: a experiência brasileira
 
-Introdução
+## Introdução
+
 
        Dívida pública é um tema muitas vezes mal compreendido e pouco amigável que, no entanto, em vir-
 tude de sua relevância para a sociedade, merece ser bem explorado. Este livro busca atender a este objetivo.
@@ -616,9 +494,7 @@ ajustes significativos, permitindo redução expressiva nos indicadores de vulne
 
   Maiores detalhes sobre a Lei de Responsabilidade Fiscal podem ser encontrados nos capítulos sobre orçamento e auditoria,
 respectivamente Capítulo 4 da Parte 2 (item 4.1 A Lei de Responsabilidade Fiscal no contexto da dívida pública) e Capítulo 5 da
-
-## Parte 2 (item 2.4.1 Condições, vedações, limites e penalidades).
-
+Parte 2 (item 2.4.1 Condições, vedações, limites e penalidades).
   Esse indicador é emblemático, pois indica que os recursos em moeda estrangeira depositados no Banco Central seriam suficientes
 para pagar a totalidade da dívida externa pública e privada do país. Para termos uma melhor idéia da relevância do atual nível, a
 série histórica da relação entre a dívida externa (pública e privada) e as reservas internacionais (de 1952 a 2008) inicia-se com 1,
@@ -671,9 +547,7 @@ o assunto, além de uma análise histórica da dívida pública, desde seu surgi
 Também são discutidos os principais pontos que permitem avaliar a sustentabilidade de uma dívida pública.
 Para isso, a parte está dividida em quatro capítulos, a seguir discriminados.
 
-
-## Capítulo 1 – Origem e história da dívida pública no Brasil até 1963
-
+Capítulo 1 – Origem e história da dívida pública no Brasil até 1963
        Busca-se resgatar, compilar e analisar aspectos marcantes da história da dívida pública brasileira. Para
 isso, buscou-se dividir cada seção do capítulo por período (Colônia, Império e República) e por tipo de dívida
 (interna e externa), tendo sido usadas, como referências, obras que tratam desses temas em detalhes. Portanto,
@@ -683,9 +557,7 @@ visão global da rica sequência de eventos e desafios enfrentados na história 
 tender os desafios herdados desse longo período, que em muito impactaram a gestão da dívida pública
 brasileira recente.
 
-
-## Capítulo 2 – História da dívida pública no Brasil: de 1964 até os dias atuais
-
+Capítulo 2 – História da dívida pública no Brasil: de 1964 até os dias atuais
 
       Neste capítulo procura-se traçar a evolução das dívidas pública interna e externa a partir de 1964,
 buscando mostrar sua evolução não só pelo aspecto quantitativo, mas também ilustrando os avanços obtidos
@@ -704,8 +576,7 @@ tranquilidade experimentado atualmente na administração da dívida externa, co
 qualitativas, o programa de recompras e a construção da curva em reais.
 
 
-## Capítulo 3 – Sustentabilidade da dívida pública
-
+Capítulo 3 – Sustentabilidade da dívida pública
        Levando-se em consideração que o endividamento público deve cumprir de forma adequada suas fun-
 ções, como destacado no início desta Introdução, faz-se necessário que o emissor adote uma política crível,
 em que os valores contratualmente estipulados sejam honrados. Em outras palavras, a política fiscal tem de
@@ -716,8 +587,7 @@ como a administração da dívida pública pode desempenhar um papel fundamental
 sustentabilidade intertemporal.
 
 
-## Capítulo 4 – Conceitos e estatísticas da dívida pública
-
+Capítulo 4 – Conceitos e estatísticas da dívida pública
 
        Neste capítulo são apresentados, de forma bastante didática e completa, os principais conceitos, es-
 tatísticas e relatórios referentes à dívida pública divulgados atualmente pelo governo brasileiro com o intuito
@@ -733,8 +603,7 @@ auxílio à administração da dívida pública e, por fim, a estrutura regulat�
 a Parte 2 foi dividida em cinco capítulos, cujos sumários são descritos a seguir:
 
 
-## Capítulo 1 – Estrutura institucional e eventos recentes na administração da Dívida Pública
-
+Capítulo 1 – Estrutura institucional e eventos recentes na administração da Dívida Pública
 Federal
       Este capítulo foi elaborado com o objetivo de oferecer uma leitura introdutória para os demais capítulos
 desta parte. Assim, procura-se, de uma maneira clara e amigável, descrever a experiência brasileira, ilustrando a
@@ -750,8 +619,7 @@ de implementação de reformas e desenvolvimento da capacidade de gestão da dí
 disseminação para outros países das boas práticas em administração da dívida.
 
 
-## Capítulo 2 – Planejamento estratégico da Dívida Pública Federal
-
+Capítulo 2 – Planejamento estratégico da Dívida Pública Federal
 
        Considerando a importância de se desenhar estratégias adequadas para a administração da dívida
 pública que levem em conta, dentre outros elementos, a composição ótima dessa dívida no longo prazo, os
@@ -764,8 +632,7 @@ a estrutura ótima da dívida no longo prazo (benchmark) e as diversas etapas do
 de transição do curto para o longo prazo.
 
 
-## Capítulo 3 – Gerenciamento de riscos da Dívida Pública Federal
-
+Capítulo 3 – Gerenciamento de riscos da Dívida Pública Federal
 
        Acompanhando a tendência do gerenciamento de riscos que se consolidou como atividade essencial no
 mercado financeiro, principalmente em função da expansão do mercado de derivativos, da maior disponibili-
@@ -783,8 +650,7 @@ ferramentas que precisam ser desenvolvidas e das habilidades específicas requer
 um guia útil para aqueles dispostos a aprimorar suas práticas de gerenciamento de riscos.
 
 
-## Capítulo 4 – O orçamento da Dívida Pública Federal
-
+Capítulo 4 – O orçamento da Dívida Pública Federal
       Neste capítulo procura-se propiciar um entendimento sobre o orçamento brasileiro como ferramenta
 essencial na administração financeira dos recursos públicos e, especificamente, no que se refere à
 Dívida Pública Federal, trazendo os principais conceitos de orçamento público, bem como os processos
@@ -800,8 +666,7 @@ por outro, pela busca da flexibilidade necessária para uma gestão eficiente de
 o risco orçamentário.
 
 
-## Capítulo 5 – Marcos regulatórios e auditoria governamental da dívida pública
-
+Capítulo 5 – Marcos regulatórios e auditoria governamental da dívida pública
       Em perspectiva geral, este capítulo descreve os marcos regulatórios e o processo de auditoria governamental
 sobre a dívida pública no Brasil. A importância da estrutura regulatória e da auditoria em um processo eficiente
 de gestão da dívida pública é destacável, pois tal processo não é completo se não houver marcos regulatórios
@@ -821,8 +686,7 @@ Direto, desenvolvido e gerenciado pelo Tesouro Nacional. Mostra-se, a seguir, o 
 sete capítulos que compõem a referida parte.
 
 
-## Capítulo 1 – Evolução recente do mercado de títulos da Dívida Pública Federal
-
+Capítulo 1 – Evolução recente do mercado de títulos da Dívida Pública Federal
        Este capítulo busca ser introdutório e dar sequência aos capítulos seguintes, procurando trazer uma
 visão geral do mercado de títulos da Dívida Pública Federal, bem como destacar os principais avanços recentes
 nesse mercado, tendo como pano de fundo as melhores experiências relatadas por organismos internacionais.
@@ -833,8 +697,7 @@ Por fim, aborda sucintamente as principais medidas para o desenvolvimento do mer
 conquistados à luz do que se observa para as melhores práticas internacionais.
 
 
-## Capítulo 2 – Títulos públicos federais e suas formas de precificação
-
+Capítulo 2 – Títulos públicos federais e suas formas de precificação
      O objetivo deste capítulo é descrever, de forma clara e didática, os principais títulos utilizados pelo Tesouro
 Nacional para financiamento da Dívida Pública Federal, suas características e metodologias de cálculo, bem
 como os insumos que servem de base para a formação de seus preços, levando-se em conta que o Tesouro
@@ -845,8 +708,7 @@ dos últimos anos, com a colaboração de diversos participantes do mercado, par
 a simplificar seus títulos e a facilitar sua correta avaliação pelos investidores.
 
 
-## Capítulo 3 – Organização do mercado financeiro no Brasil
-
+Capítulo 3 – Organização do mercado financeiro no Brasil
        Ao considerar a importância do relacionamento periódico com diversos segmentos do mercado financeiro,
 tais como associações de classe, câmaras de custódia e bolsas de valores, para que a administração da dívida
 trabalhe em um ambiente propício, a fim de atingir seus objetivos, o capítulo analisa cada um dos principais
@@ -858,8 +720,7 @@ da atuação das entidades de classe, do papel das centrais de custódia e das c
 como dos sistemas e do ambiente de negociação de títulos.
 
 
-## Capítulo 4 – Mercado primário da Dívida Pública Federal
-
+Capítulo 4 – Mercado primário da Dívida Pública Federal
       O objetivo primordial deste capítulo é apresentar um panorama geral do mercado primário dos títulos
 emitidos pelo governo federal por intermédio do Tesouro Nacional, seu único emissor. Para tal, são descritas as
 modalidades de emissão nos mercados doméstico e internacional, apresentando, em linhas gerais, a estratégia
@@ -869,8 +730,7 @@ diversos. Adicionalmente, o capítulo mostra o alinhamento da atuação do Tesou
 transparência e previsibilidade, de acordo com as melhores práticas internacionais.
 
 
-## Capítulo 5 – A base de investidores da Dívida Pública Federal no Brasil
-
+Capítulo 5 – A base de investidores da Dívida Pública Federal no Brasil
       Como destaca o Banco Mundial (2007 e 2001),12 promover uma base de investidores diversificada, em
 termos de horizontes de investimento, preferências ao risco e motivações para comercialização dos ativos, é vital
 para estimular os negócios e a alta liquidez dos títulos públicos. Além disso, tal diversificação é fundamental
@@ -889,8 +749,7 @@ para os próximos anos.
 
 28                                                                             Dívida Pública: a experiência brasileira
 
-## Capítulo 6 – Mercado secundário da Dívida Pública Federal
-
+Capítulo 6 – Mercado secundário da Dívida Pública Federal
        Uma das principais precondições para a existência de um mecanismo eficiente de financiamento público
 é a existência de um mercado secundário desenvolvido de títulos públicos. É nas negociações em mercado
 secundário que se formam, de maneira eficiente, as referências de preços dos diversos ativos, as quais, por sua
@@ -903,8 +762,7 @@ títulos públicos no Brasil, as características desse mercado e os esforços e
 no sentido de dar-lhe maior liquidez e transparência.
 
 
-## Capítulo 7 – Venda de títulos públicos pela internet: Programa Tesouro Direto
-
+Capítulo 7 – Venda de títulos públicos pela internet: Programa Tesouro Direto
           O objetivo deste capítulo é apresentar ao leitor o Tesouro Direto – programa de venda de títulos
 públicos federais diretamente a pessoas físicas por meio da internet, desenvolvido e gerenciado pela Secretaria
 do Tesouro Nacional. Para tal, o capítulo descreve, com riqueza de detalhes, as características do programa,
@@ -916,17 +774,14 @@ análise comparativa com programas semelhantes desenvolvidos por outros países.
 
 30   Dívida Pública: a experiência brasileira
 
-## Parte 1
+# Parte 1 – Entendendo a dívida pública brasileira
 
 Entendendo a Dívida
   Pública Brasileira
 
 32   Dívida Pública: a experiência brasileira
 
-## Parte 1
-
-
-## Capítulo 1
+## Parte 1 – Entendendo a dívida pública brasileira – Capítulo 1 – Origem e história da dívida pública no Brasil até 1963
 
 
          Origem e história da dívida pública no Brasil até 1963
@@ -2002,10 +1857,7 @@ Obs.: As equivalências não servem para correção de valores, nem demonstram o
 
 56                                                                                              Dívida Pública: a experiência brasileira
 
-## Parte 1
-
-
-## Capítulo 2
+## Parte 1 – Entendendo a dívida pública brasileira – Capítulo 2 – História da dívida pública no Brasil: de 1964 até os dias atuais
 
 
                            História da dívida pública no Brasil:
@@ -3040,10 +2892,7 @@ do Tesouro Nacional, 2000.
 
 80                                                                             Dívida Pública: a experiência brasileira
 
-## Parte 1
-
-
-## Capítulo 3
+## Parte 1 – Entendendo a dívida pública brasileira – Capítulo 3 – Sustentabilidade da dívida pública
 
 
                            Sustentabilidade da dívida pública
@@ -3829,10 +3678,7 @@ fixados de dez anos. Ao final desse período, obtemos uma composição de 100% d
 
 100   Dívida Pública: a experiência brasileira
 
-## Parte 1
-
-
-## Capítulo 4
+## Parte 1 – Entendendo a dívida pública brasileira – Capítulo 4 – Conceitos e estatísticas da dívida pública
 
 
                    Conceitos e estatísticas da dívida pública1
@@ -5028,17 +4874,14 @@ Central, o que proporcionou sua redução substancialmente.
 
 128                                                                        Dívida Pública: a experiência brasileira
 
-## Parte 2
+# Parte 2 – O gerenciamento da dívida pública brasileira
 
 O Gerenciamento da Dívida
     Pública Brasileira
 
 130   Dívida Pública: a experiência brasileira
 
-## Parte 2
-
-
-## Capítulo 1
+## Parte 2 – O gerenciamento da dívida pública brasileira – Capítulo 1 – Estrutura institucional e eventos recentes na administração da Dívida Pública Federal
 
 
                    Estrutura institucional e eventos recentes
@@ -5735,10 +5578,7 @@ Public Debt Management. Washington, DC: The World Bank, 2000.
 
 148                                                                          Dívida Pública: a experiência brasileira
 
-## Parte 2
-
-
-## Capítulo 2
+## Parte 2 – O gerenciamento da dívida pública brasileira – Capítulo 2 – Planejamento estratégico da Dívida Pública Federal
 
 
          Planejamento estratégico da Dívida Pública Federal
@@ -6629,10 +6469,7 @@ Acesso em: 2001.
 
 172   Dívida Pública: a experiência brasileira
 
-## Parte 2
-
-
-## Capítulo 3
+## Parte 2 – O gerenciamento da dívida pública brasileira – Capítulo 3 – Gerenciamento de riscos da Dívida Pública Federal
 
 
           Gerenciamento de riscos da Dívida Pública Federal
@@ -8111,10 +7948,7 @@ brasileiro ao de outros países.
 em que Mi corresponde ao período entre o instante atual e o vencimento do título.
 218                                                                         Dívida Pública: a experiência brasileira
 
-## Parte 2
-
-
-## Capítulo 4
+## Parte 2 – O gerenciamento da dívida pública brasileira – Capítulo 4 – O orçamento da Dívida Pública Federal
 
 
                    O Orçamento e a Dívida Pública Federal
@@ -8911,10 +8745,7 @@ Orçamento/2004. Disponível em: http://www.senado.gov.br/sf/orcamento/sistema/C
 
 242   Dívida Pública: a experiência brasileira
 
-## Parte 2
-
-
-## Capítulo 5
+## Parte 2 – O gerenciamento da dívida pública brasileira – Capítulo 5 – Marcos regulatórios e auditoria governamental da dívida pública
 
 
            Marcos regulatórios e auditoria governamental
@@ -10352,17 +10183,14 @@ VI – Auditoria da dívida pública
 
 278                                                                       Dívida Pública: a experiência brasileira
 
-## Parte 3
+# Parte 3 – O mercado de dívida pública no Brasil
 
 O Mercado de Dívida
   Pública no Brasil
 
 280   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 1
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 1 – Evolução recente do mercado de títulos da Dívida Pública Federal
 
 
                        Evolução recente do mercado de títulos
@@ -10950,9 +10778,7 @@ que visem a aprimorar sistemas de custódia e liquidação, por exemplo, além d
 
    Amante, Araujo e Jeanneau (2007).
    Para maiores detalhes sobre tais medidas, vide Capítulo 6 da Parte 3.
-
-## Capítulo 6 da Parte 3.
-
+   Capítulo 6 da Parte 3.
 
 300                                                                           Dívida Pública: a experiência brasileira
 
@@ -11121,10 +10947,7 @@ Washington, DC: World Bank, 2007.
 
 306   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 2
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 2 – Títulos públicos federais e suas formas de precificação
 
 
      Títulos públicos federais e suas formas de precificação
@@ -12225,10 +12048,7 @@ Os CFTs poderão ser emitidos em cinco subséries distintas: subsérie 1, subsé
 
 338   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 3
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 3 – Organização do mercado financeiro no Brasil
 
 
                   Organização do mercado financeiro no Brasil
@@ -13121,10 +12941,7 @@ tion. Washington-DC: The World Bank, 2007.
 
 358   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 4
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 4 – Mercado primário da Dívida Pública Federal
 
 
                  Mercado primário da Dívida Pública Federal
@@ -14064,10 +13881,7 @@ do título, o que pode gerar perdas no mercado pós-leilão.
 
 382   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 5
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 5 – A base de investidores da Dívida Pública Federal no Brasil
 
 
     A base de investidores da Dívida Pública Federal no Brasil1
@@ -15326,10 +15140,7 @@ disponíveis nos Relatórios sobre a Dívida Pública Federal publicados pela Se
 
 414   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 6
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 6 – Mercado secundário da Dívida Pública Federal
 
 
                  Mercado secundário da Dívida Pública Federal
@@ -16179,9 +15990,7 @@ medida atrai novos agentes para esse mercado, aumentando a negociação desse ti
 
 
    Para maiores detalhes sobre a estratégia de organização e os resultados das reuniões com participantes do mercado, ver
-
-## Capítulo 5 da Parte 3.
-
+Capítulo 5 da Parte 3.
    Contribuição Provisória sobre Movimentação Financeira. Tal tributo não foi renovado para o período seguinte a 31 de dezembro
 de 2007, fazendo com que a Conta Investimento, na prática, não fosse mais necessária.
    Logo após a aprovação da Conta Investimento, as Medidas Provisórias nºs 206 e 209, editadas em agosto de 2004, visaram a
@@ -16297,10 +16106,7 @@ Washington, 2007.
 
 442   Dívida Pública: a experiência brasileira
 
-## Parte 3
-
-
-## Capítulo 7
+## Parte 3 – O mercado de dívida pública no Brasil – Capítulo 7 – Venda de títulos públicos pela internet: Programa Tesouro Direto
 
 
                       Venda de títulos públicos pela internet:
